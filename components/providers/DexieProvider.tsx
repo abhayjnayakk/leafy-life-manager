@@ -15,27 +15,36 @@ async function migrateLocalTasksToSupabase() {
 
   try {
     const localTasks = await db.tasks.toArray()
-    if (localTasks.length > 0) {
-      const rows = localTasks.map((t) => ({
-        title: t.title,
-        description: t.description ?? null,
-        due_date: t.dueDate ?? null,
-        priority: t.priority,
-        status: t.status,
-        assigned_to: t.assignedTo,
-        completed_at: t.completedAt ?? null,
-        created_by: t.createdBy,
-      }))
-      const { error } = await supabase.from("tasks").insert(rows)
-      if (error) {
-        console.warn("Task migration to Supabase failed:", error.message)
+    if (localTasks.length === 0) {
+      localStorage.setItem(MIGRATION_KEY, "true")
+      return
+    }
+
+    const rows = localTasks.map((t) => ({
+      title: t.title,
+      description: t.description ?? null,
+      due_date: t.dueDate ?? null,
+      priority: t.priority,
+      status: t.status,
+      assigned_to: t.assignedTo,
+      completed_at: t.completedAt ?? null,
+      created_by: t.createdBy,
+    }))
+
+    const { error } = await supabase.from("tasks").insert(rows)
+    if (error) {
+      // 42P01 = "relation does not exist" — table not created yet, retry next load
+      if (error.code === "42P01") {
+        console.warn("Tasks table does not exist yet. Will retry after table is created.")
         return
       }
+      console.warn("Task migration to Supabase failed:", error.message)
+      // Set flag anyway to prevent infinite retries for other errors
+    } else {
       await db.tasks.clear()
     }
   } catch (err) {
     console.warn("Task migration error:", err)
-    return
   }
 
   localStorage.setItem(MIGRATION_KEY, "true")

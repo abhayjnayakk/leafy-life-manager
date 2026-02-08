@@ -172,6 +172,21 @@ CREATE TABLE IF NOT EXISTS bowl_components (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- 14. TASKS
+CREATE TABLE IF NOT EXISTS tasks (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  title TEXT NOT NULL,
+  description TEXT,
+  due_date DATE,
+  priority TEXT NOT NULL DEFAULT 'medium',
+  status TEXT NOT NULL DEFAULT 'pending',
+  assigned_to TEXT NOT NULL,
+  completed_at TIMESTAMPTZ,
+  created_by TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- ============================================================
 -- ENABLE REALTIME ON ALL TABLES
 -- ============================================================
@@ -188,6 +203,7 @@ ALTER PUBLICATION supabase_realtime ADD TABLE recipes;
 ALTER PUBLICATION supabase_realtime ADD TABLE recipe_ingredients;
 ALTER PUBLICATION supabase_realtime ADD TABLE bowl_templates;
 ALTER PUBLICATION supabase_realtime ADD TABLE bowl_components;
+ALTER PUBLICATION supabase_realtime ADD TABLE tasks;
 
 -- ============================================================
 -- ROW LEVEL SECURITY (allow all for now — no auth)
@@ -230,3 +246,17 @@ CREATE POLICY "Allow all" ON bowl_templates FOR ALL USING (true) WITH CHECK (tru
 
 ALTER TABLE bowl_components ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Allow all" ON bowl_components FOR ALL USING (true) WITH CHECK (true);
+
+ALTER TABLE tasks ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow all" ON tasks FOR ALL USING (true) WITH CHECK (true);
+
+-- ============================================================
+-- UNIQUE CONSTRAINTS (prevent duplicate data)
+-- ============================================================
+ALTER TABLE ingredients ADD CONSTRAINT ingredients_name_unique UNIQUE (name);
+ALTER TABLE menu_items ADD CONSTRAINT menu_items_name_unique UNIQUE (name);
+ALTER TABLE recipes ADD CONSTRAINT recipes_name_menu_size_unique UNIQUE (name, menu_item_id, size_variant);
+ALTER TABLE recipe_ingredients ADD CONSTRAINT recipe_ingredients_recipe_ingredient_unique UNIQUE (recipe_id, ingredient_id);
+ALTER TABLE alert_rules ADD CONSTRAINT alert_rules_name_unique UNIQUE (name);
+ALTER TABLE bowl_templates ADD CONSTRAINT bowl_templates_name_unique UNIQUE (name);
+ALTER TABLE bowl_components ADD CONSTRAINT bowl_components_template_type_name_unique UNIQUE (bowl_template_id, component_type, name);
