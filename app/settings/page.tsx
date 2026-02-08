@@ -146,27 +146,35 @@ export default function SettingsPage() {
     }
     setDangerError("")
     try {
+      // Helper: Supabase requires a filter for delete — use created_at > epoch
+      // (.neq("id", "") fails because id is UUID and "" is not valid UUID)
+      const deleteAll = (table: string) =>
+        supabase.from(table).delete().gt("created_at", "1970-01-01")
+      // For tables using updated_at instead of created_at
+      const deleteAllByUpdated = (table: string) =>
+        supabase.from(table).delete().gt("updated_at", "1970-01-01")
+
       switch (dangerAction) {
         case "clearOrders":
-          await supabase.from("orders").delete().neq("id", "")
-          await supabase.from("daily_revenue").delete().neq("id", "")
+          await deleteAll("orders")
+          await deleteAll("daily_revenue")
           toast.success("All orders and revenue data cleared")
           break
         case "clearTasks":
-          await supabase.from("tasks").delete().neq("id", "")
+          await deleteAll("tasks")
           toast.success("All tasks cleared")
           break
         case "clearRecipes":
-          await supabase.from("recipe_ingredients").delete().neq("id", "")
-          await supabase.from("recipes").delete().neq("id", "")
+          await deleteAll("recipe_ingredients")
+          await deleteAll("recipes")
           toast.success("All recipes cleared")
           break
         case "clearAlerts":
-          await supabase.from("alerts").delete().neq("id", "")
+          await deleteAll("alerts")
           toast.success("All alerts cleared")
           break
         case "clearLoginHistory":
-          await supabase.from("login_history").delete().neq("id", "")
+          await supabase.from("login_history").delete().gt("login_at", "1970-01-01")
           toast.success("Login history cleared")
           break
         case "resetInventory": {
@@ -180,21 +188,22 @@ export default function SettingsPage() {
           break
         }
         case "reset":
+          // Delete child tables first (recipe_ingredients before recipes)
+          await deleteAll("recipe_ingredients")
+          await deleteAll("bowl_components")
           await Promise.all([
-            supabase.from("recipe_ingredients").delete().neq("id", ""),
-            supabase.from("recipes").delete().neq("id", ""),
-            supabase.from("orders").delete().neq("id", ""),
-            supabase.from("daily_revenue").delete().neq("id", ""),
-            supabase.from("menu_items").delete().neq("id", ""),
-            supabase.from("ingredients").delete().neq("id", ""),
-            supabase.from("alert_rules").delete().neq("id", ""),
-            supabase.from("alerts").delete().neq("id", ""),
-            supabase.from("app_settings").delete().neq("id", ""),
-            supabase.from("tasks").delete().neq("id", ""),
-            supabase.from("login_history").delete().neq("id", ""),
-            supabase.from("bowl_templates").delete().neq("id", ""),
-            supabase.from("bowl_components").delete().neq("id", ""),
-            supabase.from("expenses").delete().neq("id", ""),
+            deleteAll("recipes"),
+            deleteAll("orders"),
+            deleteAll("daily_revenue"),
+            deleteAll("menu_items"),
+            deleteAll("ingredients"),
+            deleteAll("alert_rules"),
+            deleteAll("alerts"),
+            deleteAllByUpdated("app_settings"),
+            deleteAll("tasks"),
+            supabase.from("login_history").delete().gt("login_at", "1970-01-01"),
+            deleteAll("bowl_templates"),
+            deleteAll("expenses"),
           ])
           toast.success("Database reset complete")
           window.location.reload()
