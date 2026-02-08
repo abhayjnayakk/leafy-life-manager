@@ -1,9 +1,10 @@
 "use client"
 
+import { useState, useEffect, useRef } from "react"
 import { Bell, LogOut } from "lucide-react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { useSupaAlerts } from "@/lib/hooks/useSupaAlerts"
+import { supabase } from "@/lib/supabase/client"
 import { useAuth } from "@/lib/auth"
 import { motion, AnimatePresence } from "framer-motion"
 
@@ -16,13 +17,49 @@ const PAGE_TITLES: Record<string, string> = {
   "/settings": "Settings",
 }
 
+/**
+ * Lightweight alert count — uses a single COUNT query + realtime,
+ * instead of fetching all alert rows like useSupaAlerts does.
+ */
+function useAlertCount() {
+  const [count, setCount] = useState(0)
+  const mountedRef = useRef(true)
+
+  useEffect(() => {
+    mountedRef.current = true
+
+    async function fetchCount() {
+      const { count: c } = await supabase
+        .from("alerts")
+        .select("*", { count: "exact", head: true })
+        .eq("is_read", false)
+        .is("resolved_at", null)
+      if (mountedRef.current) setCount(c ?? 0)
+    }
+
+    fetchCount()
+
+    const channel = supabase
+      .channel("header-alert-count")
+      .on("postgres_changes", { event: "*", schema: "public", table: "alerts" }, () => {
+        if (mountedRef.current) fetchCount()
+      })
+      .subscribe()
+
+    return () => {
+      mountedRef.current = false
+      supabase.removeChannel(channel)
+    }
+  }, [])
+
+  return count
+}
+
 export function Header() {
   const pathname = usePathname()
   const title = PAGE_TITLES[pathname] ?? "Leafy Life"
-  const { alerts } = useSupaAlerts()
+  const unreadCount = useAlertCount()
   const { logout } = useAuth()
-
-  const unreadCount = alerts.filter((a) => !a.isRead && !a.resolvedAt).length
 
   return (
     <header className="sticky top-0 z-40 border-b border-border/60 bg-background/80 backdrop-blur-lg">

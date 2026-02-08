@@ -29,9 +29,8 @@ async function migrateLocalTasksToSupabase() {
       const { error } = await supabase.from("tasks").insert(rows)
       if (error) {
         console.warn("Task migration to Supabase failed:", error.message)
-        return // don't mark as migrated, will retry next load
+        return
       }
-      // Clear local tasks
       await db.tasks.clear()
     }
   } catch (err) {
@@ -43,30 +42,43 @@ async function migrateLocalTasksToSupabase() {
 }
 
 export function DexieProvider({ children }: { children: ReactNode }) {
-  const [ready, setReady] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // Run seed + migration + alerts in the background — don't block rendering
   useEffect(() => {
-    seedDatabase()
-      .then(() => migrateIngredientDefaults())
-      .then(() => migrateLocalTasksToSupabase())
-      .then(() => migrateAllDataToSupabase())
-      .then(() => runAlertEngine())
-      .then(() => setReady(true))
-      .catch((err) => {
+    let mounted = true
+
+    async function init() {
+      try {
+        // Seed & migrate Dexie defaults (fast — just checks flags)
+        await seedDatabase()
+        await migrateIngredientDefaults()
+
+        // Migrations run in parallel (each table is independent)
+        await Promise.all([
+          migrateLocalTasksToSupabase(),
+          migrateAllDataToSupabase(),
+        ])
+
+        // Alert engine runs in background — don't wait
+        runAlertEngine().catch(console.error)
+      } catch (err: any) {
         console.error("Failed to initialize database:", err)
-        setError(err?.message ?? "Unknown error")
-      })
+        if (mounted) setError(err?.message ?? "Unknown error")
+      }
+    }
+
+    init()
+    return () => { mounted = false }
   }, [])
 
-  // Run alert engine every 15 minutes
+  // Run alert engine every 30 minutes (was 15 — reduced frequency)
   useEffect(() => {
-    if (!ready) return
     const interval = setInterval(() => {
       runAlertEngine().catch(console.error)
-    }, 15 * 60 * 1000)
+    }, 30 * 60 * 1000)
     return () => clearInterval(interval)
-  }, [ready])
+  }, [])
 
   if (error) {
     return (
@@ -111,16 +123,6 @@ export function DexieProvider({ children }: { children: ReactNode }) {
     )
   }
 
-  if (!ready) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="text-center space-y-3">
-          <div className="text-lg font-semibold tracking-tight">Leafy Life</div>
-          <p className="text-sm text-muted-foreground">Loading...</p>
-        </div>
-      </div>
-    )
-  }
-
+  // Render children immediately — no loading screen
   return <>{children}</>
 }

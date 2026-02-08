@@ -1,54 +1,54 @@
 import { supabase } from "@/lib/supabase/client"
 import type { Alert } from "@/lib/db/schema"
 import { format, subDays, startOfMonth, endOfMonth, differenceInDays, parseISO } from "date-fns"
-import { fetchAllTasks } from "@/lib/services/tasks"
 
 export async function runAlertEngine(): Promise<number> {
-  // Read alert rules from Supabase
-  const { data: rulesData } = await supabase
-    .from("alert_rules")
-    .select("*")
-    .eq("is_active", true)
+  // Fetch active rules and existing unresolved alerts in parallel
+  const [{ data: rulesData }, { data: existingData }] = await Promise.all([
+    supabase.from("alert_rules").select("*").eq("is_active", true),
+    supabase.from("alerts").select("type,title,related_entity_id").is("resolved_at", null),
+  ])
 
   const activeRules = rulesData ?? []
-  const newAlerts: Omit<Alert, "id">[] = []
+  if (activeRules.length === 0) return 0
+
+  const existingAlerts = existingData ?? []
   const now = new Date().toISOString()
+
+  // Collect all check promises — run ALL checks in parallel
+  const checkPromises: Promise<Omit<Alert, "id">[]>[] = []
 
   for (const rule of activeRules) {
     const params = (rule.parameters ?? {}) as Record<string, number | string>
     switch (rule.condition) {
       case "stock_below_threshold":
-        await checkLowStock(newAlerts, now)
+        checkPromises.push(checkLowStock(now))
         break
       case "monthly_rent_due":
-        checkRentDue(params, newAlerts, now)
+        checkPromises.push(Promise.resolve(checkRentDue(params, now)))
         break
       case "daily_revenue_below":
-        await checkLowRevenue(params, newAlerts, now)
+        checkPromises.push(checkLowRevenue(params, now))
         break
       case "daily_revenue_above":
-        await checkHighRevenue(params, newAlerts, now)
+        checkPromises.push(checkHighRevenue(params, now))
         break
       case "expense_exceeds_budget":
-        await checkExpenseBudget(params, newAlerts, now)
+        checkPromises.push(checkExpenseBudget(params, now))
         break
       case "expiry_within_days":
-        await checkExpiringIngredients(params, newAlerts, now)
+        checkPromises.push(checkExpiringIngredients(params, now))
         break
       case "task_overdue":
-        await checkOverdueTasks(newAlerts, now)
+        checkPromises.push(checkOverdueTasks(now))
         break
     }
   }
 
-  // Deduplicate against existing unresolved alerts in Supabase
-  const { data: existingData } = await supabase
-    .from("alerts")
-    .select("*")
-    .is("resolved_at", null)
+  const results = await Promise.all(checkPromises)
+  const newAlerts = results.flat()
 
-  const existingAlerts = existingData ?? []
-
+  // Deduplicate against existing unresolved alerts
   const trulyNew = newAlerts.filter(
     (na) =>
       !existingAlerts.some(
@@ -76,26 +76,20 @@ export async function runAlertEngine(): Promise<number> {
   return trulyNew.length
 }
 
-async function checkLowStock(
-  alerts: Omit<Alert, "id">[],
-  now: string
-): Promise<void> {
-  const { data } = await supabase.from("ingredients").select("*")
-  const ingredients = data ?? []
+async function checkLowStock(now: string): Promise<Omit<Alert, "id">[]> {
+  // Only select the columns we need
+  const { data } = await supabase
+    .from("ingredients")
+    .select("id,name,current_stock,minimum_threshold,unit")
 
-  for (const ing of ingredients) {
+  const alerts: Omit<Alert, "id">[] = []
+  for (const ing of data ?? []) {
     const stock = Number(ing.current_stock)
     const threshold = Number(ing.minimum_threshold)
     if (stock <= threshold) {
-      const severity =
-        stock === 0
-          ? "critical"
-          : stock <= threshold * 0.5
-            ? "high"
-            : "medium"
       alerts.push({
         type: "LowStock",
-        severity,
+        severity: stock === 0 ? "critical" : stock <= threshold * 0.5 ? "high" : "medium",
         title: `Low Stock: ${ing.name}`,
         description: `${ing.name} is at ${stock} ${ing.unit} (threshold: ${threshold} ${ing.unit})`,
         relatedEntityId: ing.id,
@@ -105,91 +99,89 @@ async function checkLowStock(
       })
     }
   }
+  return alerts
 }
 
 function checkRentDue(
   params: Record<string, number | string>,
-  alerts: Omit<Alert, "id">[],
   now: string
-): void {
+): Omit<Alert, "id">[] {
   const dayOfMonth = (params.dayOfMonth as number) || 1
   const reminderDays = (params.reminderDaysBefore as number) || 3
   const currentDay = new Date().getDate()
-  const daysUntilDue =
-    dayOfMonth >= currentDay ? dayOfMonth - currentDay : 0
+  const daysUntilDue = dayOfMonth >= currentDay ? dayOfMonth - currentDay : 0
 
   if (daysUntilDue <= reminderDays) {
-    alerts.push({
+    return [{
       type: "RentDue",
       severity: daysUntilDue === 0 ? "high" : "medium",
       title: "Rent Payment Due",
-      description:
-        daysUntilDue === 0
-          ? "Rent payment is due today!"
-          : `Rent payment is due in ${daysUntilDue} day(s)`,
+      description: daysUntilDue === 0
+        ? "Rent payment is due today!"
+        : `Rent payment is due in ${daysUntilDue} day(s)`,
       isRead: false,
       createdAt: now,
-    })
+    }]
   }
+  return []
 }
 
 async function checkLowRevenue(
   params: Record<string, number | string>,
-  alerts: Omit<Alert, "id">[],
   now: string
-): Promise<void> {
+): Promise<Omit<Alert, "id">[]> {
   const threshold = params.amount as number
   const yesterday = format(subDays(new Date(), 1), "yyyy-MM-dd")
   const { data } = await supabase
     .from("daily_revenue")
-    .select("*")
+    .select("total_sales")
     .eq("date", yesterday)
     .single()
 
   if (data && Number(data.total_sales) < threshold) {
     const totalSales = Number(data.total_sales)
-    alerts.push({
+    return [{
       type: "RevenueThreshold",
       severity: totalSales < threshold * 0.5 ? "high" : "medium",
       title: "Low Revenue Alert",
       description: `Yesterday's revenue was Rs ${totalSales.toLocaleString("en-IN")} (below Rs ${(threshold as number).toLocaleString("en-IN")})`,
       isRead: false,
       createdAt: now,
-    })
+    }]
   }
+  return []
 }
 
 async function checkHighRevenue(
   params: Record<string, number | string>,
-  alerts: Omit<Alert, "id">[],
   now: string
-): Promise<void> {
+): Promise<Omit<Alert, "id">[]> {
   const threshold = params.amount as number
   const yesterday = format(subDays(new Date(), 1), "yyyy-MM-dd")
   const { data } = await supabase
     .from("daily_revenue")
-    .select("*")
+    .select("total_sales")
     .eq("date", yesterday)
     .single()
 
   if (data && Number(data.total_sales) > threshold) {
     const totalSales = Number(data.total_sales)
-    alerts.push({
+    return [{
       type: "RevenueThreshold",
       severity: "low",
       title: "Great Revenue Day!",
       description: `Yesterday's revenue was Rs ${totalSales.toLocaleString("en-IN")} - above Rs ${(threshold as number).toLocaleString("en-IN")} target`,
       isRead: false,
       createdAt: now,
-    })
+    }]
   }
+  return []
 }
 
 async function checkExpenseBudget(
   params: Record<string, number | string>,
-  alerts: Omit<Alert, "id">[],
   now: string
-): Promise<void> {
+): Promise<Omit<Alert, "id">[]> {
   const monthlyBudget = params.monthlyBudget as number
   const today = new Date()
   const monthStart = format(startOfMonth(today), "yyyy-MM-dd")
@@ -202,6 +194,7 @@ async function checkExpenseBudget(
     .lte("date", monthEnd)
 
   const totalExpenses = (data ?? []).reduce((s: number, e: any) => s + Number(e.amount), 0)
+  const alerts: Omit<Alert, "id">[] = []
 
   if (totalExpenses > monthlyBudget) {
     alerts.push({
@@ -222,21 +215,23 @@ async function checkExpenseBudget(
       createdAt: now,
     })
   }
+  return alerts
 }
 
 async function checkExpiringIngredients(
   params: Record<string, number | string>,
-  alerts: Omit<Alert, "id">[],
   now: string
-): Promise<void> {
+): Promise<Omit<Alert, "id">[]> {
   const warningDays = (params.days as number) || 3
   const today = new Date()
 
+  // Only fetch ingredients with expiry dates, only needed columns
   const { data } = await supabase
     .from("ingredients")
-    .select("*")
+    .select("id,name,expiry_date")
     .not("expiry_date", "is", null)
 
+  const alerts: Omit<Alert, "id">[] = []
   for (const ing of data ?? []) {
     if (!ing.expiry_date) continue
     const expiry = parseISO(ing.expiry_date)
@@ -266,33 +261,35 @@ async function checkExpiringIngredients(
       })
     }
   }
+  return alerts
 }
 
-async function checkOverdueTasks(
-  alerts: Omit<Alert, "id">[],
-  now: string
-): Promise<void> {
+async function checkOverdueTasks(now: string): Promise<Omit<Alert, "id">[]> {
   const today = new Date().toISOString().split("T")[0]
 
-  const allTasks = await fetchAllTasks()
-  const tasks = allTasks.filter((t) => t.status !== "completed" && !!t.dueDate)
+  // Server-side filter: only incomplete tasks with due dates
+  const { data } = await supabase
+    .from("tasks")
+    .select("id,title,due_date,priority")
+    .neq("status", "completed")
+    .not("due_date", "is", null)
 
-  for (const task of tasks) {
-    if (!task.dueDate) continue
+  const alerts: Omit<Alert, "id">[] = []
+  for (const task of data ?? []) {
+    if (!task.due_date) continue
 
-    if (task.dueDate < today) {
+    if (task.due_date < today) {
       const daysOverdue = Math.floor(
-        (new Date().getTime() - new Date(task.dueDate).getTime()) / (1000 * 60 * 60 * 24)
+        (new Date().getTime() - new Date(task.due_date).getTime()) / (1000 * 60 * 60 * 24)
       )
-      const severity =
-        task.priority === "urgent" || daysOverdue > 3
-          ? "critical"
-          : task.priority === "high" || daysOverdue > 1
-            ? "high"
-            : "medium"
       alerts.push({
         type: "TaskDue",
-        severity,
+        severity:
+          task.priority === "urgent" || daysOverdue > 3
+            ? "critical"
+            : task.priority === "high" || daysOverdue > 1
+              ? "high"
+              : "medium",
         title: `Overdue: ${task.title}`,
         description: `Task "${task.title}" was due ${daysOverdue} day(s) ago (${task.priority} priority)`,
         relatedEntityId: task.id,
@@ -300,7 +297,7 @@ async function checkOverdueTasks(
         isRead: false,
         createdAt: now,
       })
-    } else if (task.dueDate === today) {
+    } else if (task.due_date === today) {
       alerts.push({
         type: "TaskDue",
         severity: task.priority === "urgent" ? "high" : "low",
@@ -313,6 +310,7 @@ async function checkOverdueTasks(
       })
     }
   }
+  return alerts
 }
 
 export async function resolveAlert(alertId: string): Promise<void> {
