@@ -6,7 +6,7 @@ import { useSupaOrders } from "@/lib/hooks/useSupaOrders"
 import { useAuth } from "@/lib/auth"
 import { supabase } from "@/lib/supabase/client"
 import {
-  Minus, Plus, ShoppingCart, Trash2, X, Store, Truck, Clock, ChevronUp, Search, Package, CalendarClock,
+  Minus, Plus, ShoppingCart, Trash2, X, Store, Truck, Clock, ChevronUp, Search, Package, CalendarClock, Download,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dialog"
 import { formatINR } from "@/lib/format"
 import { createOrder } from "@/lib/services/orders"
+import { exportOrdersToExcel } from "@/lib/services/orderExport"
 import type {
   MenuItem, OrderItem, OrderType, PaymentMethod, SizeOption,
 } from "@/lib/db/schema"
@@ -390,7 +391,23 @@ export default function OrdersPage() {
             <DialogHeader>
               <DialogTitle>Order History</DialogTitle>
             </DialogHeader>
-            <Input type="date" value={historyDate} onChange={(e) => setHistoryDate(e.target.value)} className="w-48 mb-3" />
+            <div className="flex items-center gap-2 mb-3">
+              <Input type="date" value={historyDate} onChange={(e) => setHistoryDate(e.target.value)} className="w-48" />
+              {isAdmin && (todayOrders ?? []).length > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5 shrink-0"
+                  onClick={() => {
+                    exportOrdersToExcel(todayOrders ?? [], historyDate)
+                    toast.success("Excel exported!")
+                  }}
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  Export
+                </Button>
+              )}
+            </div>
             {(todayOrders ?? []).length === 0 ? (
               <p className="text-center py-8 text-muted-foreground text-sm">No orders for this date</p>
             ) : (
