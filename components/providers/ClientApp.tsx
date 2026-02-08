@@ -4,6 +4,7 @@ import { Component, type ReactNode, type ErrorInfo } from "react"
 import { Suspense } from "react"
 import { AuthProvider, useAuth } from "@/lib/auth"
 import { LoginPage } from "@/components/auth/LoginPage"
+import { UserSelectionPage } from "@/components/auth/UserSelectionPage"
 import { DexieProvider } from "./DexieProvider"
 import { AppShell } from "@/components/layout/AppShell"
 
@@ -93,7 +94,11 @@ class ErrorBoundary extends Component<
 }
 
 function AuthGate({ children }: { children: ReactNode }) {
-  const { isAuthenticated } = useAuth()
+  const { isAuthenticated, needsUserSelection } = useAuth()
+
+  if (needsUserSelection) {
+    return <UserSelectionPage />
+  }
 
   if (!isAuthenticated) {
     return <LoginPage />

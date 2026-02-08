@@ -84,9 +84,10 @@ export function useSupaIngredients() {
 
           if (payload.eventType === "INSERT") {
             const item = rowToIngredient(payload.new as SupabaseIngredientRow)
-            setIngredients((prev) =>
-              [...prev, item].sort((a, b) => a.name.localeCompare(b.name))
-            )
+            setIngredients((prev) => {
+              if (prev.some((i) => i.id === item.id)) return prev
+              return [...prev, item].sort((a, b) => a.name.localeCompare(b.name))
+            })
           } else if (payload.eventType === "UPDATE") {
             const updated = rowToIngredient(payload.new as SupabaseIngredientRow)
             setIngredients((prev) =>

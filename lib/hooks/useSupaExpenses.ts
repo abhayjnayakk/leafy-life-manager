@@ -69,7 +69,10 @@ export function useSupaExpenses() {
 
           if (payload.eventType === "INSERT") {
             const exp = rowToExpense(payload.new as SupabaseExpenseRow)
-            setExpenses((prev) => [exp, ...prev])
+            setExpenses((prev) => {
+              if (prev.some((e) => e.id === exp.id)) return prev
+              return [exp, ...prev]
+            })
           } else if (payload.eventType === "UPDATE") {
             const updated = rowToExpense(payload.new as SupabaseExpenseRow)
             setExpenses((prev) =>

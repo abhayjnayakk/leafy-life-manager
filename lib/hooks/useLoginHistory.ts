@@ -70,7 +70,10 @@ export function useLoginHistory(limit = 50) {
 
           if (payload.eventType === "INSERT") {
             const rec = rowToLogin(payload.new as SupabaseLoginRow)
-            setHistory((prev) => [rec, ...prev].slice(0, limit))
+            setHistory((prev) => {
+              if (prev.some((r) => r.id === rec.id)) return prev
+              return [rec, ...prev].slice(0, limit)
+            })
           } else if (payload.eventType === "UPDATE") {
             const updated = rowToLogin(payload.new as SupabaseLoginRow)
             setHistory((prev) =>

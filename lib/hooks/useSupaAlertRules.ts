@@ -67,7 +67,10 @@ export function useSupaAlertRules() {
 
           if (payload.eventType === "INSERT") {
             const rule = rowToAlertRule(payload.new as SupabaseAlertRuleRow)
-            setAlertRules((prev) => [rule, ...prev])
+            setAlertRules((prev) => {
+              if (prev.some((r) => r.id === rule.id)) return prev
+              return [rule, ...prev]
+            })
           } else if (payload.eventType === "UPDATE") {
             const updated = rowToAlertRule(payload.new as SupabaseAlertRuleRow)
             setAlertRules((prev) =>

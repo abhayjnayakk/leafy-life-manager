@@ -29,7 +29,9 @@ interface AuthContextType {
   isAuthenticated: boolean
   isAdmin: boolean
   isStaff: boolean
+  needsUserSelection: boolean
   login: (password: string) => { success: boolean; error?: string }
+  selectUser: (userId: string) => void
   logout: () => void
 }
 
@@ -37,20 +39,29 @@ interface AuthContextType {
 // CREDENTIALS
 // ============================================================
 
-const CREDENTIALS: Array<{
+/** Single master password for all users */
+const MASTER_PASSWORD = "lifeleafy@2026"
+
+/** Shortcut PINs that bypass user selection */
+const SHORTCUT_CREDENTIALS: Array<{
   password: string
   role: UserRole
   name: string
   userId: string
 }> = [
-  // Admins
-  { password: "abhay@2026", role: "admin", name: "Abhay", userId: "abhay" },
-  { password: "bharat@2026", role: "admin", name: "Bharat", userId: "bharat" },
-  { password: "gautami@2026", role: "admin", name: "Gautami", userId: "gautami" },
-  // Staff
-  { password: "vereesh@2026", role: "staff", name: "Vereesh", userId: "vereesh" },
-  // Admin-as-Staff (for testing)
   { password: "0987", role: "staff", name: "Admin Test", userId: "admin_staff" },
+]
+
+/** All selectable users shown on the "Who are you?" page */
+export const USERS: Array<{
+  userId: string
+  name: string
+  role: UserRole
+}> = [
+  { userId: "abhay", name: "Abhay", role: "admin" },
+  { userId: "bharat", name: "Bharat", role: "admin" },
+  { userId: "gautami", name: "Gautami", role: "admin" },
+  { userId: "vereesh", name: "Vereesh", role: "staff" },
 ]
 
 // ============================================================
@@ -64,6 +75,7 @@ const SESSION_KEY = "buble_leafy_session"
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null)
+  const [masterAuthenticated, setMasterAuthenticated] = useState(false)
   const [hydrated, setHydrated] = useState(false)
   const sessionRef = useRef<string>("")
 
@@ -75,6 +87,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const parsed = JSON.parse(stored) as AuthUser
         if (parsed.role && parsed.name && parsed.userId) {
           setUser(parsed)
+          setMasterAuthenticated(true) // already fully logged in
         }
       }
       const sess = localStorage.getItem(SESSION_KEY)
@@ -87,10 +100,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback((password: string) => {
     const trimmed = password.trim()
-    const match = CREDENTIALS.find((c) => c.password === trimmed)
-    if (!match) {
-      return { success: false, error: "Invalid password" }
+
+    // Check shortcut PINs first (bypass user selection)
+    const shortcut = SHORTCUT_CREDENTIALS.find((c) => c.password === trimmed)
+    if (shortcut) {
+      const authUser: AuthUser = {
+        userId: shortcut.userId,
+        role: shortcut.role,
+        name: shortcut.name,
+      }
+      setUser(authUser)
+      setMasterAuthenticated(true)
+      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(authUser))
+      recordLogin(shortcut.userId, shortcut.name, shortcut.role)
+        .then((sessionId) => {
+          sessionRef.current = sessionId
+          localStorage.setItem(SESSION_KEY, sessionId)
+        })
+        .catch(console.error)
+      return { success: true }
     }
+
+    // Check master password
+    if (trimmed === MASTER_PASSWORD) {
+      setMasterAuthenticated(true)
+      return { success: true }
+    }
+
+    return { success: false, error: "Invalid password" }
+  }, [])
+
+  const selectUser = useCallback((userId: string) => {
+    const match = USERS.find((u) => u.userId === userId)
+    if (!match) return
     const authUser: AuthUser = {
       userId: match.userId,
       role: match.role,
@@ -106,8 +148,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.setItem(SESSION_KEY, sessionId)
       })
       .catch(console.error)
-
-    return { success: true }
   }, [])
 
   const logout = useCallback(() => {
@@ -116,6 +156,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       recordLogout(sessionRef.current).catch(console.error)
     }
     setUser(null)
+    setMasterAuthenticated(false)
     sessionRef.current = ""
     localStorage.removeItem(AUTH_STORAGE_KEY)
     localStorage.removeItem(SESSION_KEY)
@@ -126,9 +167,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isAuthenticated: user !== null,
     isAdmin: user?.role === "admin",
     isStaff: user?.role === "staff",
+    needsUserSelection: masterAuthenticated && user === null,
     login,
+    selectUser,
     logout,
-  }), [user, login, logout])
+  }), [user, masterAuthenticated, login, selectUser, logout])
 
   // Don't render until hydrated to avoid flash
   if (!hydrated) {

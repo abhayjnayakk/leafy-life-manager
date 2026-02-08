@@ -65,7 +65,10 @@ export function useSupaDailyRevenue() {
 
           if (payload.eventType === "INSERT") {
             const rev = rowToRevenue(payload.new as SupaDailyRevenueRow)
-            setRevenue((prev) => [rev, ...prev])
+            setRevenue((prev) => {
+              if (prev.some((r) => r.id === rev.id)) return prev
+              return [rev, ...prev]
+            })
           } else if (payload.eventType === "UPDATE") {
             const updated = rowToRevenue(payload.new as SupaDailyRevenueRow)
             setRevenue((prev) =>

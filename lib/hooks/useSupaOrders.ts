@@ -84,7 +84,10 @@ export function useSupaOrders(dateFilter?: string) {
           if (payload.eventType === "INSERT") {
             const newOrder = rowToOrder(payload.new as SupabaseOrderRow)
             if (!dateFilter || newOrder.date === dateFilter) {
-              setOrders((prev) => [newOrder, ...prev])
+              setOrders((prev) => {
+                if (prev.some((o) => o.id === newOrder.id)) return prev
+                return [newOrder, ...prev]
+              })
             }
           } else if (payload.eventType === "UPDATE") {
             const updated = rowToOrder(payload.new as SupabaseOrderRow)

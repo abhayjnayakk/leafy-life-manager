@@ -82,7 +82,10 @@ export function useTasks() {
 
           if (payload.eventType === "INSERT") {
             const newTask = rowToTask(payload.new as SupabaseTaskRow)
-            setTasks((prev) => [newTask, ...prev])
+            setTasks((prev) => {
+              if (prev.some((t) => t.id === newTask.id)) return prev
+              return [newTask, ...prev]
+            })
           } else if (payload.eventType === "UPDATE") {
             const updated = rowToTask(payload.new as SupabaseTaskRow)
             setTasks((prev) =>

@@ -57,7 +57,10 @@ export function useSupaAppSettings() {
 
           if (payload.eventType === "INSERT") {
             const s = rowToSetting(payload.new as SupabaseSettingsRow)
-            setSettings((prev) => [...prev, s])
+            setSettings((prev) => {
+              if (prev.some((x) => x.id === s.id)) return prev
+              return [...prev, s]
+            })
           } else if (payload.eventType === "UPDATE") {
             const updated = rowToSetting(payload.new as SupabaseSettingsRow)
             setSettings((prev) =>
