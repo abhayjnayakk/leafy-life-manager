@@ -26,7 +26,7 @@ export async function createOrder(
   customerName?: string,
   customerPhone?: string,
   createdBy?: string
-): Promise<string> {
+): Promise<{ id: string; deductedCount: number; skippedItems: string[] }> {
   const now = new Date().toISOString()
   const date = orderDate ?? now.split("T")[0]
   const orderNumber = await generateOrderNumber(date)
@@ -57,13 +57,19 @@ export async function createOrder(
   if (orderError) throw new Error(`Failed to create order: ${orderError.message}`)
 
   // Deduct inventory — collect all deductions first, then batch update
+  let deductedCount = 0
+  const skippedItems: string[] = []
+
   try {
     const deductions = new Map<string, number>()
     const ingredientIdsForExclusion = new Set<string>()
 
     // Phase 1: Collect deductions from all items
     for (const item of items) {
-      if (item.customizations) continue // Custom bowls have no ingredient mappings
+      if (item.customizations) {
+        skippedItems.push(`${item.menuItemName} (custom bowl)`)
+        continue
+      }
 
       const { data: recipes } = await supabase
         .from("recipes")
@@ -74,7 +80,7 @@ export async function createOrder(
         recipes?.find((r: any) => r.size_variant === item.size) ?? recipes?.[0]
 
       if (!recipe) {
-        console.warn(`No recipe found for "${item.menuItemName}" (${item.size})`)
+        skippedItems.push(`${item.menuItemName} (no recipe)`)
         continue
       }
 
@@ -83,7 +89,10 @@ export async function createOrder(
         .select("ingredient_id, quantity")
         .eq("recipe_id", recipe.id)
 
-      if (!recipeIngs?.length) continue
+      if (!recipeIngs?.length) {
+        skippedItems.push(`${item.menuItemName} (no ingredients in recipe)`)
+        continue
+      }
 
       // Track ingredient IDs that may need name lookup for exclusion filtering
       const hasExclusions = item.excludedIngredients && item.excludedIngredients.length > 0
@@ -102,7 +111,6 @@ export async function createOrder(
 
       // For items with exclusions, store temporarily and process after name lookup
       if (hasExclusions) {
-        // Tag these recipe ingredients with the item for later processing
         ;(item as any)._recipeIngs = recipeIngs
       }
     }
@@ -139,17 +147,24 @@ export async function createOrder(
       const ids = [...deductions.keys()]
       const { data: ingredients } = await supabase
         .from("ingredients")
-        .select("id, current_stock")
+        .select("id, current_stock, name")
         .in("id", ids)
 
       for (const ing of ingredients ?? []) {
         const deductQty = deductions.get(ing.id) ?? 0
-        const newStock = Math.max(0, Number(ing.current_stock) - deductQty)
+        const oldStock = Number(ing.current_stock)
+        const newStock = Math.max(0, oldStock - deductQty)
         await supabase
           .from("ingredients")
           .update({ current_stock: newStock, updated_at: now })
           .eq("id", ing.id)
+        deductedCount++
+        console.log(`📦 Stock: ${ing.name} ${oldStock} → ${newStock} (−${deductQty})`)
       }
+    }
+
+    if (skippedItems.length > 0) {
+      console.warn("⚠️ Skipped inventory deduction for:", skippedItems.join(", "))
     }
   } catch (err) {
     // Stock deduction failure should not block the order
@@ -159,7 +174,7 @@ export async function createOrder(
   // Update daily revenue
   await updateDailyRevenue(date, totalAmount, paymentMethod, now)
 
-  return inserted.id as string
+  return { id: inserted.id as string, deductedCount, skippedItems }
 }
 
 async function updateDailyRevenue(

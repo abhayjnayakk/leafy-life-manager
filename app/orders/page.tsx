@@ -127,7 +127,7 @@ export default function OrdersPage() {
   async function handlePlaceOrder() {
     if (cart.length === 0) return
     const items: OrderItem[] = cart.map(({ _key, ...i }) => i)
-    await createOrder(
+    const result = await createOrder(
       items,
       paymentMethod,
       orderType,
@@ -139,6 +139,12 @@ export default function OrdersPage() {
       user?.name
     )
     toast.success(`Order placed! ${formatINR(total)}`)
+    if (result.deductedCount > 0) {
+      toast.info(`📦 ${result.deductedCount} ingredient${result.deductedCount > 1 ? "s" : ""} updated in inventory`)
+    }
+    if (result.skippedItems.length > 0) {
+      toast.warning(`No recipe for: ${result.skippedItems.join(", ")}`, { duration: 5000 })
+    }
     setCart([])
     setDiscount("")
     setCartExpanded(false)

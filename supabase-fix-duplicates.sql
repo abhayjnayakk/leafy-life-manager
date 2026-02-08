@@ -1,16 +1,22 @@
 -- ============================================================
--- LEAFY LIFE MANAGER — Database Fix Script
+-- LEAFY LIFE MANAGER — Database Fix & Migration Script
 -- Run this ENTIRE script in your Supabase SQL Editor
--- 1. Creates missing tasks table
--- 2. Removes duplicate rows from all affected tables
--- 3. Adds UNIQUE constraints to prevent future duplicates
+--
+-- Safe to run multiple times (all statements are idempotent)
+--
+-- What it does:
+-- 1. Creates tasks table if missing (with completed_by)
+-- 2. Adds completed_by column if tasks table exists without it
+-- 3. Removes duplicate rows from all affected tables
+-- 4. Adds UNIQUE constraints to prevent future duplicates
 -- ============================================================
 
 
 -- ============================================================
--- SECTION A: CREATE MISSING TASKS TABLE
+-- SECTION A: TASKS TABLE — CREATE OR MIGRATE
 -- ============================================================
 
+-- Create table if it doesn't exist at all
 CREATE TABLE IF NOT EXISTS tasks (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   title TEXT NOT NULL,
@@ -20,17 +26,27 @@ CREATE TABLE IF NOT EXISTS tasks (
   status TEXT NOT NULL DEFAULT 'pending',
   assigned_to TEXT NOT NULL,
   completed_at TIMESTAMPTZ,
+  completed_by TEXT,
   created_by TEXT NOT NULL,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Enable realtime
-ALTER PUBLICATION supabase_realtime ADD TABLE tasks;
+-- If table already existed without completed_by, add it now
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS completed_by TEXT;
 
--- Enable RLS with open policy (no auth)
+-- Enable realtime (safe — ignores if already added)
+DO $$ BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE tasks;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+-- Enable RLS + open policy (safe — ignores if already exists)
 ALTER TABLE tasks ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Allow all" ON tasks FOR ALL USING (true) WITH CHECK (true);
+DO $$ BEGIN
+  CREATE POLICY "Allow all" ON tasks FOR ALL USING (true) WITH CHECK (true);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 
 -- ============================================================
@@ -87,7 +103,7 @@ DELETE FROM bowl_components WHERE id NOT IN (
   ORDER BY bowl_template_id, component_type, name, created_at ASC, id ASC
 );
 
--- 8. App settings — dedup on key (already has UNIQUE, but clean up just in case)
+-- 8. App settings — dedup on key
 DELETE FROM app_settings WHERE id NOT IN (
   SELECT DISTINCT ON (key) id
   FROM app_settings
@@ -97,33 +113,43 @@ DELETE FROM app_settings WHERE id NOT IN (
 
 -- ============================================================
 -- SECTION C: ADD UNIQUE CONSTRAINTS (prevent future duplicates)
+-- Safe — uses DO blocks to skip if constraint already exists
 -- ============================================================
 
--- Ingredients: one row per name
-ALTER TABLE ingredients ADD CONSTRAINT ingredients_name_unique UNIQUE (name);
+DO $$ BEGIN
+  ALTER TABLE ingredients ADD CONSTRAINT ingredients_name_unique UNIQUE (name);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
--- Menu items: one row per name
-ALTER TABLE menu_items ADD CONSTRAINT menu_items_name_unique UNIQUE (name);
+DO $$ BEGIN
+  ALTER TABLE menu_items ADD CONSTRAINT menu_items_name_unique UNIQUE (name);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
--- Recipes: one row per (name, menu_item_id, size_variant)
--- Note: size_variant is nullable; Postgres UNIQUE treats NULLs as distinct
--- This is fine — the dedup DELETE above handles existing dupes, and the
--- app-level supabaseHasData() guard prevents re-insertion
-ALTER TABLE recipes ADD CONSTRAINT recipes_name_menu_size_unique
-  UNIQUE (name, menu_item_id, size_variant);
+DO $$ BEGIN
+  ALTER TABLE recipes ADD CONSTRAINT recipes_name_menu_size_unique
+    UNIQUE (name, menu_item_id, size_variant);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
--- Recipe ingredients: one row per (recipe_id, ingredient_id)
-ALTER TABLE recipe_ingredients ADD CONSTRAINT recipe_ingredients_recipe_ingredient_unique
-  UNIQUE (recipe_id, ingredient_id);
+DO $$ BEGIN
+  ALTER TABLE recipe_ingredients ADD CONSTRAINT recipe_ingredients_recipe_ingredient_unique
+    UNIQUE (recipe_id, ingredient_id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
--- Alert rules: one row per name
-ALTER TABLE alert_rules ADD CONSTRAINT alert_rules_name_unique UNIQUE (name);
+DO $$ BEGIN
+  ALTER TABLE alert_rules ADD CONSTRAINT alert_rules_name_unique UNIQUE (name);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
--- Bowl templates: one row per name
-ALTER TABLE bowl_templates ADD CONSTRAINT bowl_templates_name_unique UNIQUE (name);
+DO $$ BEGIN
+  ALTER TABLE bowl_templates ADD CONSTRAINT bowl_templates_name_unique UNIQUE (name);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
--- Bowl components: one row per (bowl_template_id, component_type, name)
-ALTER TABLE bowl_components ADD CONSTRAINT bowl_components_template_type_name_unique
-  UNIQUE (bowl_template_id, component_type, name);
-
--- app_settings already has UNIQUE(key) from original DDL — no change needed
+DO $$ BEGIN
+  ALTER TABLE bowl_components ADD CONSTRAINT bowl_components_template_type_name_unique
+    UNIQUE (bowl_template_id, component_type, name);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
