@@ -1,6 +1,7 @@
 import { db } from "@/lib/db/client"
 import type { Alert } from "@/lib/db/schema"
 import { format, subDays, startOfMonth, endOfMonth, differenceInDays, parseISO } from "date-fns"
+import { fetchAllTasks } from "@/lib/services/tasks"
 
 export async function runAlertEngine(): Promise<number> {
   const activeRules = await db.alertRules.filter((r) => r.isActive).toArray()
@@ -234,9 +235,10 @@ async function checkOverdueTasks(
   now: string
 ): Promise<void> {
   const today = new Date().toISOString().split("T")[0]
-  const tasks = await db.tasks
-    .filter((t) => t.status !== "completed" && !!t.dueDate)
-    .toArray()
+
+  // Read tasks from Supabase (cloud source of truth)
+  const allTasks = await fetchAllTasks()
+  const tasks = allTasks.filter((t) => t.status !== "completed" && !!t.dueDate)
 
   for (const task of tasks) {
     if (!task.dueDate) continue

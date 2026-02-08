@@ -222,7 +222,7 @@ export interface Alert {
   severity: AlertSeverity
   title: string
   description: string
-  relatedEntityId?: number
+  relatedEntityId?: number | string
   relatedEntityType?: string
   isRead: boolean
   resolvedAt?: string
@@ -259,7 +259,7 @@ export type TaskStatus = "pending" | "in_progress" | "completed"
 export type TaskAssignee = "admin" | "staff"
 
 export interface Task {
-  id?: number
+  id?: string
   title: string
   description?: string
   dueDate?: string

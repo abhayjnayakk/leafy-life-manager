@@ -51,7 +51,8 @@ import type {
   AlertRuleCondition,
 } from "@/lib/db/schema"
 import { useAuth } from "@/lib/auth"
-import { updateTaskStatus, deleteTask as deleteTaskService } from "@/lib/services/tasks"
+import { updateTaskStatus, updateTask, deleteTask as deleteTaskService, addTask } from "@/lib/services/tasks"
+import { useTasks } from "@/lib/hooks/useTasks"
 import { formatDateShort } from "@/lib/format"
 import { toast } from "sonner"
 import { AnimatedPage, AnimatedCollapse, StaggerGroup, StaggerItem } from "@/components/ui/animated"
@@ -115,7 +116,7 @@ export default function SettingsPage() {
   const menuItems = useLiveQuery(() => db.menuItems.toArray(), [])
   const ingredients = useLiveQuery(() => db.ingredients.orderBy("name").toArray(), [])
   const rules = useLiveQuery(() => db.alertRules.toArray(), [])
-  const tasks = useLiveQuery(() => db.tasks.toArray(), [])
+  const { tasks, loading: tasksLoading } = useTasks()
 
   return (
     <AnimatedPage className="space-y-3 pb-24">
@@ -161,9 +162,9 @@ export default function SettingsPage() {
           <SettingsSection
             icon={ClipboardList}
             title="Tasks"
-            count={tasks?.filter(t => t.status !== "completed").length ?? 0}
+            count={tasks.filter(t => t.status !== "completed").length}
           >
-            <TasksSettings tasks={tasks ?? []} />
+            <TasksSettings tasks={tasks} loading={tasksLoading} />
           </SettingsSection>
         </StaggerItem>
 
@@ -812,7 +813,7 @@ function IngredientDialog({
 // TASKS SETTINGS
 // ============================================================
 
-function TasksSettings({ tasks }: { tasks: Task[] }) {
+function TasksSettings({ tasks, loading }: { tasks: Task[]; loading: boolean }) {
   const [editTask, setEditTask] = useState<Task | null>(null)
   const [addOpen, setAddOpen] = useState(false)
   const [filter, setFilter] = useState<"active" | "completed" | "all">("active")
@@ -848,7 +849,10 @@ function TasksSettings({ tasks }: { tasks: Task[] }) {
         {sorted.map((task) => (
           <TaskRow key={task.id} task={task} onEdit={() => setEditTask(task)} />
         ))}
-        {sorted.length === 0 && (
+        {loading && sorted.length === 0 && (
+          <p className="text-xs text-muted-foreground text-center py-6">Loading tasks...</p>
+        )}
+        {!loading && sorted.length === 0 && (
           <p className="text-xs text-muted-foreground text-center py-6">No tasks found</p>
         )}
       </div>
@@ -949,31 +953,35 @@ function TaskDialog({ task, onClose }: { task: Task | null; onClose: () => void 
   async function handleSave() {
     if (!title.trim()) return
     const now = new Date().toISOString()
-    const data = {
-      title: title.trim(),
-      description: description.trim() || undefined,
-      dueDate: dueDate || undefined,
-      priority,
-      status,
-      assignedTo,
-      updatedAt: now,
+    try {
+      if (isNew) {
+        await addTask({
+          title: title.trim(),
+          description: description.trim() || undefined,
+          dueDate: dueDate || undefined,
+          priority,
+          status,
+          assignedTo,
+          createdBy: (user?.role as TaskAssignee) ?? "admin",
+          completedAt: status === "completed" ? now : undefined,
+        })
+        toast.success("Task added")
+      } else {
+        await updateTask(task!.id!, {
+          title: title.trim(),
+          description: description.trim() || undefined,
+          dueDate: dueDate || undefined,
+          priority,
+          status,
+          assignedTo,
+          completedAt: status === "completed" ? now : undefined,
+        })
+        toast.success("Task updated")
+      }
+      onClose()
+    } catch (err) {
+      toast.error((err as Error).message || "Failed to save task")
     }
-    if (isNew) {
-      await db.tasks.add({
-        ...data,
-        createdBy: (user?.role as TaskAssignee) ?? "admin",
-        completedAt: status === "completed" ? now : undefined,
-        createdAt: now,
-      })
-      toast.success("Task added")
-    } else {
-      await db.tasks.update(task!.id!, {
-        ...data,
-        completedAt: status === "completed" ? now : undefined,
-      })
-      toast.success("Task updated")
-    }
-    onClose()
   }
 
   return (

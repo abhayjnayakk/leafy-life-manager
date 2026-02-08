@@ -13,6 +13,7 @@ import { Check, AlertTriangle, AlertCircle, Info, TrendingUp, ClipboardList } fr
 import { resolveAlert } from "@/lib/services/alertEngine"
 import type { Alert, TaskPriority } from "@/lib/db/schema"
 import { formatDateShort } from "@/lib/format"
+import { useTasks } from "@/lib/hooks/useTasks"
 import {
   AnimatedPage,
   AnimatedNumber,
@@ -164,14 +165,12 @@ function AdminDashboard() {
 // ============================================================
 
 function ActiveTasksWidget({ assignedTo }: { assignedTo?: string }) {
-  const activeTasks = useLiveQuery(
-    () => db.tasks.filter((t) => {
-      if (t.status === "completed") return false
-      if (assignedTo && t.assignedTo !== assignedTo) return false
-      return true
-    }).toArray(),
-    [assignedTo]
-  )
+  const { tasks: allTasks } = useTasks()
+  const activeTasks = allTasks.filter((t) => {
+    if (t.status === "completed") return false
+    if (assignedTo && t.assignedTo !== assignedTo) return false
+    return true
+  })
 
   const priorityDotColor: Record<TaskPriority, string> = {
     urgent: "bg-destructive",
