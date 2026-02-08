@@ -195,73 +195,73 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS completed_by TEXT;
 -- ============================================================
 -- ENABLE REALTIME ON ALL TABLES (safe — skips if already added)
 -- ============================================================
-DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE orders; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE daily_revenue; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE ingredients; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE menu_items; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE expenses; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE app_settings; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE alerts; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE alert_rules; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE login_history; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE recipes; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE recipe_ingredients; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE bowl_templates; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE bowl_components; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE tasks; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE orders; EXCEPTION WHEN OTHERS THEN NULL; END $$;
+DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE daily_revenue; EXCEPTION WHEN OTHERS THEN NULL; END $$;
+DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE ingredients; EXCEPTION WHEN OTHERS THEN NULL; END $$;
+DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE menu_items; EXCEPTION WHEN OTHERS THEN NULL; END $$;
+DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE expenses; EXCEPTION WHEN OTHERS THEN NULL; END $$;
+DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE app_settings; EXCEPTION WHEN OTHERS THEN NULL; END $$;
+DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE alerts; EXCEPTION WHEN OTHERS THEN NULL; END $$;
+DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE alert_rules; EXCEPTION WHEN OTHERS THEN NULL; END $$;
+DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE login_history; EXCEPTION WHEN OTHERS THEN NULL; END $$;
+DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE recipes; EXCEPTION WHEN OTHERS THEN NULL; END $$;
+DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE recipe_ingredients; EXCEPTION WHEN OTHERS THEN NULL; END $$;
+DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE bowl_templates; EXCEPTION WHEN OTHERS THEN NULL; END $$;
+DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE bowl_components; EXCEPTION WHEN OTHERS THEN NULL; END $$;
+DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE tasks; EXCEPTION WHEN OTHERS THEN NULL; END $$;
 
 -- ============================================================
 -- ROW LEVEL SECURITY (safe — skips if already exists)
 -- ============================================================
 ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
-DO $$ BEGIN CREATE POLICY "Allow all" ON orders FOR ALL USING (true) WITH CHECK (true); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE POLICY "Allow all" ON orders FOR ALL USING (true) WITH CHECK (true); EXCEPTION WHEN OTHERS THEN NULL; END $$;
 
 ALTER TABLE daily_revenue ENABLE ROW LEVEL SECURITY;
-DO $$ BEGIN CREATE POLICY "Allow all" ON daily_revenue FOR ALL USING (true) WITH CHECK (true); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE POLICY "Allow all" ON daily_revenue FOR ALL USING (true) WITH CHECK (true); EXCEPTION WHEN OTHERS THEN NULL; END $$;
 
 ALTER TABLE ingredients ENABLE ROW LEVEL SECURITY;
-DO $$ BEGIN CREATE POLICY "Allow all" ON ingredients FOR ALL USING (true) WITH CHECK (true); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE POLICY "Allow all" ON ingredients FOR ALL USING (true) WITH CHECK (true); EXCEPTION WHEN OTHERS THEN NULL; END $$;
 
 ALTER TABLE menu_items ENABLE ROW LEVEL SECURITY;
-DO $$ BEGIN CREATE POLICY "Allow all" ON menu_items FOR ALL USING (true) WITH CHECK (true); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE POLICY "Allow all" ON menu_items FOR ALL USING (true) WITH CHECK (true); EXCEPTION WHEN OTHERS THEN NULL; END $$;
 
 ALTER TABLE expenses ENABLE ROW LEVEL SECURITY;
-DO $$ BEGIN CREATE POLICY "Allow all" ON expenses FOR ALL USING (true) WITH CHECK (true); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE POLICY "Allow all" ON expenses FOR ALL USING (true) WITH CHECK (true); EXCEPTION WHEN OTHERS THEN NULL; END $$;
 
 ALTER TABLE app_settings ENABLE ROW LEVEL SECURITY;
-DO $$ BEGIN CREATE POLICY "Allow all" ON app_settings FOR ALL USING (true) WITH CHECK (true); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE POLICY "Allow all" ON app_settings FOR ALL USING (true) WITH CHECK (true); EXCEPTION WHEN OTHERS THEN NULL; END $$;
 
 ALTER TABLE alerts ENABLE ROW LEVEL SECURITY;
-DO $$ BEGIN CREATE POLICY "Allow all" ON alerts FOR ALL USING (true) WITH CHECK (true); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE POLICY "Allow all" ON alerts FOR ALL USING (true) WITH CHECK (true); EXCEPTION WHEN OTHERS THEN NULL; END $$;
 
 ALTER TABLE alert_rules ENABLE ROW LEVEL SECURITY;
-DO $$ BEGIN CREATE POLICY "Allow all" ON alert_rules FOR ALL USING (true) WITH CHECK (true); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE POLICY "Allow all" ON alert_rules FOR ALL USING (true) WITH CHECK (true); EXCEPTION WHEN OTHERS THEN NULL; END $$;
 
 ALTER TABLE login_history ENABLE ROW LEVEL SECURITY;
-DO $$ BEGIN CREATE POLICY "Allow all" ON login_history FOR ALL USING (true) WITH CHECK (true); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE POLICY "Allow all" ON login_history FOR ALL USING (true) WITH CHECK (true); EXCEPTION WHEN OTHERS THEN NULL; END $$;
 
 ALTER TABLE recipes ENABLE ROW LEVEL SECURITY;
-DO $$ BEGIN CREATE POLICY "Allow all" ON recipes FOR ALL USING (true) WITH CHECK (true); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE POLICY "Allow all" ON recipes FOR ALL USING (true) WITH CHECK (true); EXCEPTION WHEN OTHERS THEN NULL; END $$;
 
 ALTER TABLE recipe_ingredients ENABLE ROW LEVEL SECURITY;
-DO $$ BEGIN CREATE POLICY "Allow all" ON recipe_ingredients FOR ALL USING (true) WITH CHECK (true); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE POLICY "Allow all" ON recipe_ingredients FOR ALL USING (true) WITH CHECK (true); EXCEPTION WHEN OTHERS THEN NULL; END $$;
 
 ALTER TABLE bowl_templates ENABLE ROW LEVEL SECURITY;
-DO $$ BEGIN CREATE POLICY "Allow all" ON bowl_templates FOR ALL USING (true) WITH CHECK (true); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE POLICY "Allow all" ON bowl_templates FOR ALL USING (true) WITH CHECK (true); EXCEPTION WHEN OTHERS THEN NULL; END $$;
 
 ALTER TABLE bowl_components ENABLE ROW LEVEL SECURITY;
-DO $$ BEGIN CREATE POLICY "Allow all" ON bowl_components FOR ALL USING (true) WITH CHECK (true); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE POLICY "Allow all" ON bowl_components FOR ALL USING (true) WITH CHECK (true); EXCEPTION WHEN OTHERS THEN NULL; END $$;
 
 ALTER TABLE tasks ENABLE ROW LEVEL SECURITY;
-DO $$ BEGIN CREATE POLICY "Allow all" ON tasks FOR ALL USING (true) WITH CHECK (true); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE POLICY "Allow all" ON tasks FOR ALL USING (true) WITH CHECK (true); EXCEPTION WHEN OTHERS THEN NULL; END $$;
 
 -- ============================================================
 -- UNIQUE CONSTRAINTS (safe — skips if already exists)
 -- ============================================================
-DO $$ BEGIN ALTER TABLE ingredients ADD CONSTRAINT ingredients_name_unique UNIQUE (name); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN ALTER TABLE menu_items ADD CONSTRAINT menu_items_name_unique UNIQUE (name); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN ALTER TABLE recipes ADD CONSTRAINT recipes_name_menu_size_unique UNIQUE (name, menu_item_id, size_variant); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN ALTER TABLE recipe_ingredients ADD CONSTRAINT recipe_ingredients_recipe_ingredient_unique UNIQUE (recipe_id, ingredient_id); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN ALTER TABLE alert_rules ADD CONSTRAINT alert_rules_name_unique UNIQUE (name); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN ALTER TABLE bowl_templates ADD CONSTRAINT bowl_templates_name_unique UNIQUE (name); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN ALTER TABLE bowl_components ADD CONSTRAINT bowl_components_template_type_name_unique UNIQUE (bowl_template_id, component_type, name); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE ingredients ADD CONSTRAINT ingredients_name_unique UNIQUE (name); EXCEPTION WHEN OTHERS THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE menu_items ADD CONSTRAINT menu_items_name_unique UNIQUE (name); EXCEPTION WHEN OTHERS THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE recipes ADD CONSTRAINT recipes_name_menu_size_unique UNIQUE (name, menu_item_id, size_variant); EXCEPTION WHEN OTHERS THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE recipe_ingredients ADD CONSTRAINT recipe_ingredients_recipe_ingredient_unique UNIQUE (recipe_id, ingredient_id); EXCEPTION WHEN OTHERS THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE alert_rules ADD CONSTRAINT alert_rules_name_unique UNIQUE (name); EXCEPTION WHEN OTHERS THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE bowl_templates ADD CONSTRAINT bowl_templates_name_unique UNIQUE (name); EXCEPTION WHEN OTHERS THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE bowl_components ADD CONSTRAINT bowl_components_template_type_name_unique UNIQUE (bowl_template_id, component_type, name); EXCEPTION WHEN OTHERS THEN NULL; END $$;

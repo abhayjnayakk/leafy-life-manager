@@ -38,14 +38,14 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS completed_by TEXT;
 -- Enable realtime (safe — ignores if already added)
 DO $$ BEGIN
   ALTER PUBLICATION supabase_realtime ADD TABLE tasks;
-EXCEPTION WHEN duplicate_object THEN NULL;
+EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
 -- Enable RLS + open policy (safe — ignores if already exists)
 ALTER TABLE tasks ENABLE ROW LEVEL SECURITY;
 DO $$ BEGIN
   CREATE POLICY "Allow all" ON tasks FOR ALL USING (true) WITH CHECK (true);
-EXCEPTION WHEN duplicate_object THEN NULL;
+EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
 
@@ -118,38 +118,38 @@ DELETE FROM app_settings WHERE id NOT IN (
 
 DO $$ BEGIN
   ALTER TABLE ingredients ADD CONSTRAINT ingredients_name_unique UNIQUE (name);
-EXCEPTION WHEN duplicate_object THEN NULL;
+EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
 DO $$ BEGIN
   ALTER TABLE menu_items ADD CONSTRAINT menu_items_name_unique UNIQUE (name);
-EXCEPTION WHEN duplicate_object THEN NULL;
+EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
 DO $$ BEGIN
   ALTER TABLE recipes ADD CONSTRAINT recipes_name_menu_size_unique
     UNIQUE (name, menu_item_id, size_variant);
-EXCEPTION WHEN duplicate_object THEN NULL;
+EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
 DO $$ BEGIN
   ALTER TABLE recipe_ingredients ADD CONSTRAINT recipe_ingredients_recipe_ingredient_unique
     UNIQUE (recipe_id, ingredient_id);
-EXCEPTION WHEN duplicate_object THEN NULL;
+EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
 DO $$ BEGIN
   ALTER TABLE alert_rules ADD CONSTRAINT alert_rules_name_unique UNIQUE (name);
-EXCEPTION WHEN duplicate_object THEN NULL;
+EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
 DO $$ BEGIN
   ALTER TABLE bowl_templates ADD CONSTRAINT bowl_templates_name_unique UNIQUE (name);
-EXCEPTION WHEN duplicate_object THEN NULL;
+EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
 DO $$ BEGIN
   ALTER TABLE bowl_components ADD CONSTRAINT bowl_components_template_type_name_unique
     UNIQUE (bowl_template_id, component_type, name);
-EXCEPTION WHEN duplicate_object THEN NULL;
+EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
