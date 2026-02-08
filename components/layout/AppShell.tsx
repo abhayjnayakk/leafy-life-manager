@@ -23,7 +23,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <DesktopSidebar />
       <div className="md:pl-14">
         <Header />
-        <main className="px-3 py-3 pb-16 md:px-5 md:py-4 md:pb-6 max-w-5xl">
+        <main className="px-3 py-3 pb-16 md:px-6 md:py-4 md:pb-6 max-w-7xl mx-auto lg:px-8">
           {isBlocked ? (
             <div className="flex flex-col items-center justify-center py-20 text-center space-y-3">
               <div className="text-4xl">🔒</div>
