@@ -9,9 +9,10 @@ import {
   useTodayRevenue,
 } from "@/lib/hooks/useFinance"
 import { useAuth } from "@/lib/auth"
-import { Check, AlertTriangle, AlertCircle, Info, TrendingUp } from "lucide-react"
+import { Check, AlertTriangle, AlertCircle, Info, TrendingUp, ClipboardList } from "lucide-react"
 import { resolveAlert } from "@/lib/services/alertEngine"
-import type { Alert } from "@/lib/db/schema"
+import type { Alert, TaskPriority } from "@/lib/db/schema"
+import { formatDateShort } from "@/lib/format"
 import {
   AnimatedPage,
   AnimatedNumber,
@@ -149,10 +150,71 @@ function AdminDashboard() {
         </StaggerItem>
       </StaggerGroup>
 
+      <ActiveTasksWidget assignedTo={undefined} />
+
       <AnimatedPresence show={(alerts?.length ?? 0) > 0}>
         <AlertSection alerts={(alerts ?? []).slice(0, 4)} />
       </AnimatedPresence>
     </AnimatedPage>
+  )
+}
+
+// ============================================================
+// ACTIVE TASKS WIDGET (shared between admin & staff dashboards)
+// ============================================================
+
+function ActiveTasksWidget({ assignedTo }: { assignedTo?: string }) {
+  const activeTasks = useLiveQuery(
+    () => db.tasks.filter((t) => {
+      if (t.status === "completed") return false
+      if (assignedTo && t.assignedTo !== assignedTo) return false
+      return true
+    }).toArray(),
+    [assignedTo]
+  )
+
+  const priorityDotColor: Record<TaskPriority, string> = {
+    urgent: "bg-destructive",
+    high: "bg-orange-500",
+    medium: "bg-blue-500",
+    low: "bg-muted-foreground/40",
+  }
+
+  if (!activeTasks || activeTasks.length === 0) return null
+
+  const sorted = [...activeTasks].sort((a, b) => {
+    const po: Record<TaskPriority, number> = { urgent: 0, high: 1, medium: 2, low: 3 }
+    return po[a.priority] - po[b.priority]
+  })
+
+  return (
+    <div className="rounded-xl border bg-card p-4 space-y-2">
+      <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+        <ClipboardList className="h-3 w-3" />
+        Active Tasks ({activeTasks.length})
+      </h2>
+      <div className="space-y-1.5">
+        {sorted.slice(0, 4).map((task) => {
+          const isOverdue = !!task.dueDate && task.dueDate < new Date().toISOString().split("T")[0]
+          return (
+            <div key={task.id} className="flex items-center gap-2.5 rounded-lg py-1">
+              <span className={`h-2 w-2 rounded-full shrink-0 ${priorityDotColor[task.priority]}`} />
+              <span className={`flex-1 text-sm font-medium truncate ${isOverdue ? "text-destructive" : ""}`}>
+                {task.title}
+              </span>
+              {task.dueDate && (
+                <span className={`text-xs shrink-0 ${isOverdue ? "text-destructive font-medium" : "text-muted-foreground"}`}>
+                  {isOverdue ? "Overdue" : formatDateShort(task.dueDate)}
+                </span>
+              )}
+            </div>
+          )
+        })}
+        {activeTasks.length > 4 && (
+          <p className="text-[10px] text-muted-foreground">+{activeTasks.length - 4} more</p>
+        )}
+      </div>
+    </div>
   )
 }
 
@@ -167,7 +229,7 @@ function StaffDashboard() {
     []
   )
   const alerts = useLiveQuery(() =>
-    db.alerts.filter((a) => !a.resolvedAt && (a.type === "LowStock" || a.type === "ExpiryWarning"))
+    db.alerts.filter((a) => !a.resolvedAt && (a.type === "LowStock" || a.type === "ExpiryWarning" || a.type === "TaskDue"))
       .reverse().toArray(),
     []
   )
@@ -205,6 +267,8 @@ function StaffDashboard() {
           </div>
         </div>
       </AnimatedPresence>
+
+      <ActiveTasksWidget assignedTo="staff" />
 
       <AnimatedPresence show={(alerts?.length ?? 0) > 0}>
         <AlertSection alerts={(alerts ?? []).slice(0, 4)} />

@@ -53,6 +53,7 @@ export type AlertType =
   | "RevenueThreshold"
   | "HighExpense"
   | "ExpiryWarning"
+  | "TaskDue"
   | "Custom"
 
 export type StorageType = "Refrigerator" | "Room Temperature" | "Freezer"
@@ -64,6 +65,7 @@ export type AlertRuleCondition =
   | "daily_revenue_above"
   | "expense_exceeds_budget"
   | "expiry_within_days"
+  | "task_overdue"
 
 export type BowlComponentType = "Base" | "Protein" | "Vegetable" | "Dressing" | "Topping"
 
@@ -243,5 +245,29 @@ export interface AppSettings {
   id?: number
   key: string
   value: string
+  updatedAt: string
+}
+
+// ============================================================
+// TASK TYPES
+// ============================================================
+
+export type TaskPriority = "low" | "medium" | "high" | "urgent"
+
+export type TaskStatus = "pending" | "in_progress" | "completed"
+
+export type TaskAssignee = "admin" | "staff"
+
+export interface Task {
+  id?: number
+  title: string
+  description?: string
+  dueDate?: string
+  priority: TaskPriority
+  status: TaskStatus
+  assignedTo: TaskAssignee
+  completedAt?: string
+  createdBy: TaskAssignee
+  createdAt: string
   updatedAt: string
 }

@@ -27,6 +27,9 @@ export async function runAlertEngine(): Promise<number> {
       case "expiry_within_days":
         await checkExpiringIngredients(rule.parameters, newAlerts, now)
         break
+      case "task_overdue":
+        await checkOverdueTasks(newAlerts, now)
+        break
     }
   }
 
@@ -219,6 +222,53 @@ async function checkExpiringIngredients(
         description: `${ing.name} expires in ${daysLeft} day(s)`,
         relatedEntityId: ing.id,
         relatedEntityType: "ingredient",
+        isRead: false,
+        createdAt: now,
+      })
+    }
+  }
+}
+
+async function checkOverdueTasks(
+  alerts: Omit<Alert, "id">[],
+  now: string
+): Promise<void> {
+  const today = new Date().toISOString().split("T")[0]
+  const tasks = await db.tasks
+    .filter((t) => t.status !== "completed" && !!t.dueDate)
+    .toArray()
+
+  for (const task of tasks) {
+    if (!task.dueDate) continue
+
+    if (task.dueDate < today) {
+      const daysOverdue = Math.floor(
+        (new Date().getTime() - new Date(task.dueDate).getTime()) / (1000 * 60 * 60 * 24)
+      )
+      const severity =
+        task.priority === "urgent" || daysOverdue > 3
+          ? "critical"
+          : task.priority === "high" || daysOverdue > 1
+            ? "high"
+            : "medium"
+      alerts.push({
+        type: "TaskDue",
+        severity,
+        title: `Overdue: ${task.title}`,
+        description: `Task "${task.title}" was due ${daysOverdue} day(s) ago (${task.priority} priority)`,
+        relatedEntityId: task.id,
+        relatedEntityType: "task",
+        isRead: false,
+        createdAt: now,
+      })
+    } else if (task.dueDate === today) {
+      alerts.push({
+        type: "TaskDue",
+        severity: task.priority === "urgent" ? "high" : "low",
+        title: `Due Today: ${task.title}`,
+        description: `Task "${task.title}" is due today (${task.priority} priority)`,
+        relatedEntityId: task.id,
+        relatedEntityType: "task",
         isRead: false,
         createdAt: now,
       })

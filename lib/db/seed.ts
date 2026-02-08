@@ -427,6 +427,13 @@ const DEFAULT_ALERT_RULES: Omit<AlertRule, "id" | "createdAt" | "updatedAt">[] =
     parameters: { days: 3 },
     isActive: true,
   },
+  {
+    name: "Overdue Task Warning",
+    type: "TaskDue",
+    condition: "task_overdue",
+    parameters: {},
+    isActive: true,
+  },
 ]
 
 // ============================================================
@@ -767,7 +774,7 @@ export async function seedDatabase(): Promise<void> {
 
   await db.transaction(
     "rw",
-    [db.menuItems, db.ingredients, db.bowlTemplates, db.bowlComponents, db.alertRules, db.appSettings, db.recipes, db.recipeIngredients],
+    [db.menuItems, db.ingredients, db.bowlTemplates, db.bowlComponents, db.alertRules, db.appSettings, db.recipes, db.recipeIngredients, db.tasks],
     async () => {
       // Seed menu items
       const menuItemIds = await db.menuItems.bulkAdd(
@@ -871,9 +878,10 @@ const CATEGORY_STORAGE_DEFAULTS: Record<string, { storageType: StorageType; shel
 export async function migrateIngredientDefaults(): Promise<void> {
   const all = await db.ingredients.toArray()
   const toUpdate = all.filter((ing) => !ing.storageType || !ing.shelfLifeDays)
-  if (toUpdate.length === 0) return
 
   const now = new Date().toISOString()
+
+  if (toUpdate.length > 0) {
   await Promise.all(
     toUpdate.map((ing) => {
       const defaults = CATEGORY_STORAGE_DEFAULTS[ing.category] ?? CATEGORY_STORAGE_DEFAULTS["Other"]
@@ -884,6 +892,21 @@ export async function migrateIngredientDefaults(): Promise<void> {
       })
     })
   )
+  }
+
+  // Ensure the task_overdue alert rule exists
+  const taskRule = await db.alertRules.filter((r) => r.condition === "task_overdue").first()
+  if (!taskRule) {
+    await db.alertRules.add({
+      name: "Overdue Task Warning",
+      type: "TaskDue",
+      condition: "task_overdue",
+      parameters: {},
+      isActive: true,
+      createdAt: now,
+      updatedAt: now,
+    })
+  }
 
   // Also ensure the ExpiryWarning alert rule exists
   const expiryRule = await db.alertRules.filter((r) => r.condition === "expiry_within_days").first()

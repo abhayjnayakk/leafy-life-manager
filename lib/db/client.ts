@@ -12,6 +12,7 @@ import type {
   Alert,
   AlertRule,
   AppSettings,
+  Task,
 } from "./schema"
 
 type LeafyLifeDB = Dexie & {
@@ -27,6 +28,7 @@ type LeafyLifeDB = Dexie & {
   alerts: EntityTable<Alert, "id">
   alertRules: EntityTable<AlertRule, "id">
   appSettings: EntityTable<AppSettings, "id">
+  tasks: EntityTable<Task, "id">
 }
 
 let _db: LeafyLifeDB | null = null
@@ -54,6 +56,11 @@ function getDb(): LeafyLifeDB {
   // Version 3: Add storageType and expiryDate indexes to ingredients
   _db.version(3).stores({
     ingredients: "++id, name, category, currentStock, storageType, expiryDate",
+  })
+
+  // Version 4: Add tasks table
+  _db.version(4).stores({
+    tasks: "++id, status, priority, assignedTo, dueDate",
   })
 
   return _db

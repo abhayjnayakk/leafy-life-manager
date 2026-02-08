@@ -14,6 +14,9 @@ import {
   Leaf,
   BellRing,
   ChevronRight,
+  ClipboardList,
+  Clock,
+  CheckCircle2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -32,7 +35,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { MENU_CATEGORIES, INGREDIENT_CATEGORIES, INGREDIENT_UNITS } from "@/lib/constants"
+import { MENU_CATEGORIES, INGREDIENT_CATEGORIES, INGREDIENT_UNITS, TASK_PRIORITIES, ALERT_RULE_CONDITIONS } from "@/lib/constants"
 import { formatINR } from "@/lib/format"
 import type {
   MenuItem,
@@ -41,7 +44,15 @@ import type {
   IngredientCategory,
   IngredientUnit,
   SizeOption,
+  Task,
+  TaskPriority,
+  TaskStatus,
+  TaskAssignee,
+  AlertRuleCondition,
 } from "@/lib/db/schema"
+import { useAuth } from "@/lib/auth"
+import { updateTaskStatus, deleteTask as deleteTaskService } from "@/lib/services/tasks"
+import { formatDateShort } from "@/lib/format"
 import { toast } from "sonner"
 import { AnimatedPage, AnimatedCollapse, StaggerGroup, StaggerItem } from "@/components/ui/animated"
 import { motion } from "framer-motion"
@@ -104,6 +115,7 @@ export default function SettingsPage() {
   const menuItems = useLiveQuery(() => db.menuItems.toArray(), [])
   const ingredients = useLiveQuery(() => db.ingredients.orderBy("name").toArray(), [])
   const rules = useLiveQuery(() => db.alertRules.toArray(), [])
+  const tasks = useLiveQuery(() => db.tasks.toArray(), [])
 
   return (
     <AnimatedPage className="space-y-3 pb-24">
@@ -142,6 +154,16 @@ export default function SettingsPage() {
             count={ingredients?.length ?? 0}
           >
             <IngredientsSettings ingredients={ingredients ?? []} />
+          </SettingsSection>
+        </StaggerItem>
+
+        <StaggerItem>
+          <SettingsSection
+            icon={ClipboardList}
+            title="Tasks"
+            count={tasks?.filter(t => t.status !== "completed").length ?? 0}
+          >
+            <TasksSettings tasks={tasks ?? []} />
           </SettingsSection>
         </StaggerItem>
 
@@ -787,6 +809,244 @@ function IngredientDialog({
 }
 
 // ============================================================
+// TASKS SETTINGS
+// ============================================================
+
+function TasksSettings({ tasks }: { tasks: Task[] }) {
+  const [editTask, setEditTask] = useState<Task | null>(null)
+  const [addOpen, setAddOpen] = useState(false)
+  const [filter, setFilter] = useState<"active" | "completed" | "all">("active")
+
+  const filtered = tasks.filter((t) => {
+    if (filter === "active") return t.status !== "completed"
+    if (filter === "completed") return t.status === "completed"
+    return true
+  })
+
+  const priorityOrder: Record<TaskPriority, number> = { urgent: 0, high: 1, medium: 2, low: 3 }
+  const sorted = [...filtered].sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority])
+
+  return (
+    <div className="space-y-3 pt-2">
+      <div className="flex items-center gap-2">
+        <Select value={filter} onValueChange={(v) => setFilter(v as "active" | "completed" | "all")}>
+          <SelectTrigger className="h-8 w-28 text-xs"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="active">Active</SelectItem>
+            <SelectItem value="completed">Completed</SelectItem>
+            <SelectItem value="all">All</SelectItem>
+          </SelectContent>
+        </Select>
+        <div className="flex-1" />
+        <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => setAddOpen(true)}>
+          <Plus className="h-3 w-3 mr-1" />
+          Add Task
+        </Button>
+      </div>
+
+      <div className="space-y-1 max-h-[50vh] overflow-y-auto">
+        {sorted.map((task) => (
+          <TaskRow key={task.id} task={task} onEdit={() => setEditTask(task)} />
+        ))}
+        {sorted.length === 0 && (
+          <p className="text-xs text-muted-foreground text-center py-6">No tasks found</p>
+        )}
+      </div>
+
+      {editTask && <TaskDialog task={editTask} onClose={() => setEditTask(null)} />}
+      {addOpen && <TaskDialog task={null} onClose={() => setAddOpen(false)} />}
+    </div>
+  )
+}
+
+function TaskRow({ task, onEdit }: { task: Task; onEdit: () => void }) {
+  const isOverdue = !!task.dueDate && task.status !== "completed" &&
+    task.dueDate < new Date().toISOString().split("T")[0]
+
+  const priorityColors: Record<TaskPriority, string> = {
+    low: "bg-muted text-muted-foreground",
+    medium: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
+    high: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400",
+    urgent: "bg-destructive/10 text-destructive",
+  }
+
+  const statusIcons: Record<TaskStatus, React.ReactNode> = {
+    pending: <Clock className="h-3.5 w-3.5 text-muted-foreground" />,
+    in_progress: <Clock className="h-3.5 w-3.5 text-blue-500" />,
+    completed: <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />,
+  }
+
+  async function cycleStatus() {
+    const next: Record<TaskStatus, TaskStatus> = {
+      pending: "in_progress",
+      in_progress: "completed",
+      completed: "pending",
+    }
+    await updateTaskStatus(task.id!, next[task.status])
+    const newStatus = next[task.status]
+    toast.success(
+      newStatus === "completed" ? "Task completed" :
+      newStatus === "in_progress" ? "Task in progress" : "Task reopened"
+    )
+  }
+
+  return (
+    <div className={`flex items-center justify-between rounded-lg border px-3 py-2 ${
+      isOverdue ? "border-destructive/30 bg-destructive/5" : ""
+    }`}>
+      <div className="flex items-center gap-2 flex-1 min-w-0">
+        <button onClick={cycleStatus} className="shrink-0">
+          {statusIcons[task.status]}
+        </button>
+        <div className="flex-1 min-w-0">
+          <div className={`text-xs font-medium ${
+            task.status === "completed" ? "line-through text-muted-foreground" : ""
+          }`}>
+            {task.title}
+          </div>
+          <div className="text-[10px] text-muted-foreground flex items-center gap-1.5 flex-wrap">
+            <Badge variant="secondary" className={`text-[9px] h-4 px-1 ${priorityColors[task.priority]}`}>
+              {task.priority}
+            </Badge>
+            <span>{task.assignedTo}</span>
+            {task.dueDate && (
+              <span className={isOverdue ? "text-destructive font-medium" : ""}>
+                {isOverdue ? "Overdue" : `Due ${formatDateShort(task.dueDate)}`}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+      <div className="flex items-center gap-0.5 shrink-0">
+        <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={onEdit}>
+          <Pencil className="h-3 w-3" />
+        </Button>
+        <Button
+          variant="ghost" size="sm"
+          className="h-6 w-6 p-0 text-destructive"
+          onClick={async () => {
+            await deleteTaskService(task.id!)
+            toast.success("Deleted")
+          }}
+        >
+          <Trash2 className="h-3 w-3" />
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+function TaskDialog({ task, onClose }: { task: Task | null; onClose: () => void }) {
+  const isNew = task === null
+  const { user } = useAuth()
+  const [title, setTitle] = useState(task?.title ?? "")
+  const [description, setDescription] = useState(task?.description ?? "")
+  const [dueDate, setDueDate] = useState(task?.dueDate ?? "")
+  const [priority, setPriority] = useState<TaskPriority>(task?.priority ?? "medium")
+  const [status, setStatus] = useState<TaskStatus>(task?.status ?? "pending")
+  const [assignedTo, setAssignedTo] = useState<TaskAssignee>(task?.assignedTo ?? "admin")
+
+  async function handleSave() {
+    if (!title.trim()) return
+    const now = new Date().toISOString()
+    const data = {
+      title: title.trim(),
+      description: description.trim() || undefined,
+      dueDate: dueDate || undefined,
+      priority,
+      status,
+      assignedTo,
+      updatedAt: now,
+    }
+    if (isNew) {
+      await db.tasks.add({
+        ...data,
+        createdBy: (user?.role as TaskAssignee) ?? "admin",
+        completedAt: status === "completed" ? now : undefined,
+        createdAt: now,
+      })
+      toast.success("Task added")
+    } else {
+      await db.tasks.update(task!.id!, {
+        ...data,
+        completedAt: status === "completed" ? now : undefined,
+      })
+      toast.success("Task updated")
+    }
+    onClose()
+  }
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle className="text-sm">{isNew ? "Add Task" : "Edit Task"}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <Label className="text-xs">Title</Label>
+            <Input value={title} onChange={(e) => setTitle(e.target.value)} autoFocus className="h-9" placeholder="e.g., Clean kitchen, Call supplier..." />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">Description (optional)</Label>
+            <textarea
+              className="w-full rounded-md border bg-background px-3 py-2 text-xs min-h-[50px] resize-none"
+              value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Task details..."
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs">Priority</Label>
+              <Select value={priority} onValueChange={(v) => setPriority(v as TaskPriority)}>
+                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {TASK_PRIORITIES.map((p) => (
+                    <SelectItem key={p} value={p}>{p.charAt(0).toUpperCase() + p.slice(1)}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Assign To</Label>
+              <Select value={assignedTo} onValueChange={(v) => setAssignedTo(v as TaskAssignee)}>
+                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="admin">Admin</SelectItem>
+                  <SelectItem value="staff">Staff</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs">Due Date (optional)</Label>
+              <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="h-9" />
+            </div>
+            {!isNew && (
+              <div className="space-y-1.5">
+                <Label className="text-xs">Status</Label>
+                <Select value={status} onValueChange={(v) => setStatus(v as TaskStatus)}>
+                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="pending">Pending</SelectItem>
+                    <SelectItem value="in_progress">In Progress</SelectItem>
+                    <SelectItem value="completed">Completed</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" className="flex-1 h-9 text-xs" onClick={onClose}>Cancel</Button>
+            <Button className="flex-1 h-9 text-xs" onClick={handleSave}>{isNew ? "Add Task" : "Save"}</Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ============================================================
 // ALERT RULES SETTINGS
 // ============================================================
 
@@ -798,6 +1058,7 @@ function AlertRulesSettings({ rules }: { rules: Array<{
   parameters: Record<string, number | string>
   isActive: boolean
 }> }) {
+  const [createOpen, setCreateOpen] = useState(false)
 
   async function toggleRule(id: number, isActive: boolean) {
     await db.alertRules.update(id, {
@@ -805,6 +1066,11 @@ function AlertRulesSettings({ rules }: { rules: Array<{
       updatedAt: new Date().toISOString(),
     })
     toast.success(isActive ? "Disabled" : "Enabled")
+  }
+
+  async function deleteRule(id: number) {
+    await db.alertRules.delete(id)
+    toast.success("Rule deleted")
   }
 
   async function updateParam(id: number, params: Record<string, number | string>, key: string, value: string) {
@@ -817,9 +1083,15 @@ function AlertRulesSettings({ rules }: { rules: Array<{
 
   return (
     <div className="space-y-3 pt-2">
-      <p className="text-xs text-muted-foreground">
-        Alert engine runs every 15 minutes.
-      </p>
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-muted-foreground">
+          Alert engine runs every 15 minutes.
+        </p>
+        <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setCreateOpen(true)}>
+          <Plus className="h-3 w-3 mr-1" />
+          Add Rule
+        </Button>
+      </div>
       <div className="space-y-2">
         {rules.map((rule) => (
           <div key={rule.id} className="rounded-lg border p-3 space-y-2">
@@ -832,14 +1104,24 @@ function AlertRulesSettings({ rules }: { rules: Array<{
                   }`}
                 />
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-6 text-[10px] px-2"
-                onClick={() => toggleRule(rule.id!, rule.isActive)}
-              >
-                {rule.isActive ? "Disable" : "Enable"}
-              </Button>
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-6 text-[10px] px-2"
+                  onClick={() => toggleRule(rule.id!, rule.isActive)}
+                >
+                  {rule.isActive ? "Disable" : "Enable"}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 w-6 p-0 text-destructive"
+                  onClick={() => deleteRule(rule.id!)}
+                >
+                  <Trash2 className="h-3 w-3" />
+                </Button>
+              </div>
             </div>
             <div className="text-[10px] text-muted-foreground">
               {rule.type} · {rule.condition}
@@ -869,6 +1151,133 @@ function AlertRulesSettings({ rules }: { rules: Array<{
           </p>
         )}
       </div>
+
+      {createOpen && <AlertRuleDialog onClose={() => setCreateOpen(false)} />}
     </div>
+  )
+}
+
+// ============================================================
+// ALERT RULE DIALOG (Create new rule)
+// ============================================================
+
+const CONDITION_PARAMS: Record<AlertRuleCondition, Array<{ key: string; label: string; defaultVal: number }>> = {
+  stock_below_threshold: [],
+  monthly_rent_due: [
+    { key: "dayOfMonth", label: "Day of Month", defaultVal: 1 },
+    { key: "reminderDaysBefore", label: "Reminder Days Before", defaultVal: 3 },
+  ],
+  daily_revenue_below: [{ key: "amount", label: "Amount (₹)", defaultVal: 3000 }],
+  daily_revenue_above: [{ key: "amount", label: "Amount (₹)", defaultVal: 15000 }],
+  expense_exceeds_budget: [{ key: "monthlyBudget", label: "Monthly Budget (₹)", defaultVal: 50000 }],
+  expiry_within_days: [{ key: "days", label: "Warning Days", defaultVal: 3 }],
+  task_overdue: [],
+}
+
+const CONDITION_TO_TYPE: Record<AlertRuleCondition, string> = {
+  stock_below_threshold: "LowStock",
+  monthly_rent_due: "RentDue",
+  daily_revenue_below: "RevenueThreshold",
+  daily_revenue_above: "RevenueThreshold",
+  expense_exceeds_budget: "HighExpense",
+  expiry_within_days: "ExpiryWarning",
+  task_overdue: "TaskDue",
+}
+
+const CONDITION_LABELS: Record<AlertRuleCondition, string> = {
+  stock_below_threshold: "Stock Below Threshold",
+  monthly_rent_due: "Monthly Rent Due",
+  daily_revenue_below: "Daily Revenue Below",
+  daily_revenue_above: "Daily Revenue Above",
+  expense_exceeds_budget: "Expense Exceeds Budget",
+  expiry_within_days: "Expiry Within Days",
+  task_overdue: "Task Overdue",
+}
+
+function AlertRuleDialog({ onClose }: { onClose: () => void }) {
+  const [name, setName] = useState("")
+  const [condition, setCondition] = useState<AlertRuleCondition>("stock_below_threshold")
+  const [isActive, setIsActive] = useState(true)
+  const [params, setParams] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    const defaults: Record<string, string> = {}
+    for (const p of CONDITION_PARAMS[condition]) {
+      defaults[p.key] = String(p.defaultVal)
+    }
+    setParams(defaults)
+  }, [condition])
+
+  async function handleSave() {
+    if (!name.trim()) return
+    const now = new Date().toISOString()
+    const numericParams: Record<string, number | string> = {}
+    for (const [k, v] of Object.entries(params)) {
+      numericParams[k] = Number(v)
+    }
+    await db.alertRules.add({
+      name: name.trim(),
+      type: CONDITION_TO_TYPE[condition] as any,
+      condition,
+      parameters: numericParams,
+      isActive,
+      createdAt: now,
+      updatedAt: now,
+    })
+    toast.success("Alert rule created")
+    onClose()
+  }
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle className="text-sm">Create Alert Rule</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <Label className="text-xs">Name</Label>
+            <Input value={name} onChange={(e) => setName(e.target.value)} autoFocus className="h-9"
+              placeholder="e.g., Low Revenue Warning" />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">Condition Type</Label>
+            <Select value={condition} onValueChange={(v) => setCondition(v as AlertRuleCondition)}>
+              <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {ALERT_RULE_CONDITIONS.map((c) => (
+                  <SelectItem key={c} value={c}>{CONDITION_LABELS[c]}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {CONDITION_PARAMS[condition].length > 0 && (
+            <div className="space-y-2">
+              <Label className="text-xs">Parameters</Label>
+              {CONDITION_PARAMS[condition].map((p) => (
+                <div key={p.key} className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground w-36 shrink-0">{p.label}</span>
+                  <Input
+                    type="number"
+                    value={params[p.key] ?? ""}
+                    onChange={(e) => setParams((prev) => ({ ...prev, [p.key]: e.target.value }))}
+                    className="h-8 text-xs flex-1"
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="flex items-center gap-2">
+            <input type="checkbox" id="ruleActive" checked={isActive}
+              onChange={(e) => setIsActive(e.target.checked)} className="rounded border" />
+            <Label htmlFor="ruleActive" className="text-xs">Start active</Label>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" className="flex-1 h-9 text-xs" onClick={onClose}>Cancel</Button>
+            <Button className="flex-1 h-9 text-xs" onClick={handleSave}>Create Rule</Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }

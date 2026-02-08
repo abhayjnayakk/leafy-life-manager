@@ -65,10 +65,25 @@ export const ALERT_TYPES = [
   "RevenueThreshold",
   "HighExpense",
   "ExpiryWarning",
+  "TaskDue",
   "Custom",
 ] as const
 
 export const ALERT_SEVERITIES = ["low", "medium", "high", "critical"] as const
+
+export const TASK_PRIORITIES = ["low", "medium", "high", "urgent"] as const
+
+export const TASK_STATUSES = ["pending", "in_progress", "completed"] as const
+
+export const ALERT_RULE_CONDITIONS = [
+  "stock_below_threshold",
+  "monthly_rent_due",
+  "daily_revenue_below",
+  "daily_revenue_above",
+  "expense_exceeds_budget",
+  "expiry_within_days",
+  "task_overdue",
+] as const
 
 export const NAV_ITEMS = [
   { label: "Dashboard", href: "/", icon: "LayoutDashboard" },
