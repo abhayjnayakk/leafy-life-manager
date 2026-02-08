@@ -31,7 +31,7 @@ interface AuthContextType {
   isStaff: boolean
   needsUserSelection: boolean
   login: (password: string) => { success: boolean; error?: string }
-  selectUser: (userId: string) => void
+  selectUser: (userId: string, password: string) => { success: boolean; error?: string }
   logout: () => void
 }
 
@@ -57,11 +57,12 @@ export const USERS: Array<{
   userId: string
   name: string
   role: UserRole
+  password: string
 }> = [
-  { userId: "abhay", name: "Abhay", role: "admin" },
-  { userId: "bharat", name: "Bharat", role: "admin" },
-  { userId: "gautami", name: "Gautami", role: "admin" },
-  { userId: "vereesh", name: "Vereesh", role: "staff" },
+  { userId: "abhay", name: "Abhay", role: "admin", password: "abhay@2026" },
+  { userId: "bharat", name: "Bharat", role: "admin", password: "bharat@2026" },
+  { userId: "gautami", name: "Gautami", role: "admin", password: "gautami@2026" },
+  { userId: "vereesh", name: "Vereesh", role: "staff", password: "vereesh@2026" },
 ]
 
 // ============================================================
@@ -130,9 +131,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { success: false, error: "Invalid password" }
   }, [])
 
-  const selectUser = useCallback((userId: string) => {
+  const selectUser = useCallback((userId: string, password: string) => {
     const match = USERS.find((u) => u.userId === userId)
-    if (!match) return
+    if (!match) return { success: false, error: "User not found" }
+
+    if (password.trim() !== match.password) {
+      return { success: false, error: "Wrong password" }
+    }
+
     const authUser: AuthUser = {
       userId: match.userId,
       role: match.role,
@@ -148,6 +154,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.setItem(SESSION_KEY, sessionId)
       })
       .catch(console.error)
+
+    return { success: true }
   }, [])
 
   const logout = useCallback(() => {
