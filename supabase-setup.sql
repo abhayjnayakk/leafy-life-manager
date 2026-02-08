@@ -182,6 +182,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   status TEXT NOT NULL DEFAULT 'pending',
   assigned_to TEXT NOT NULL,
   completed_at TIMESTAMPTZ,
+  completed_by TEXT,
   created_by TEXT NOT NULL,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()

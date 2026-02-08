@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import { formatINR, formatPercent } from "@/lib/format"
 import {
   useMonthlyRevenueShareStatus,
@@ -11,11 +11,23 @@ import { useSupaIngredients } from "@/lib/hooks/useSupaIngredients"
 import { useSupaAlerts } from "@/lib/hooks/useSupaAlerts"
 import { useSupaOrders } from "@/lib/hooks/useSupaOrders"
 import { useAuth } from "@/lib/auth"
-import { Check, AlertTriangle, AlertCircle, Info, TrendingUp, ClipboardList } from "lucide-react"
+import {
+  Check,
+  AlertTriangle,
+  AlertCircle,
+  Info,
+  TrendingUp,
+  ClipboardList,
+  Plus,
+  Square,
+  CheckSquare,
+} from "lucide-react"
 import { resolveAlert } from "@/lib/services/alertEngine"
-import type { Alert, TaskPriority } from "@/lib/db/schema"
+import type { Alert, TaskPriority, TaskAssignee } from "@/lib/db/schema"
 import { formatDateShort } from "@/lib/format"
 import { useTasks } from "@/lib/hooks/useTasks"
+import { updateTaskStatus, addTask } from "@/lib/services/tasks"
+import { toast } from "sonner"
 import {
   AnimatedPage,
   AnimatedNumber,
@@ -24,7 +36,7 @@ import {
   CircularProgress,
   AnimatedPresence,
 } from "@/components/ui/animated"
-import { motion } from "framer-motion"
+import { motion, AnimatePresence } from "framer-motion"
 import {
   BarChart,
   Bar,
@@ -156,7 +168,7 @@ function AdminDashboard() {
         </StaggerItem>
       </StaggerGroup>
 
-      <ActiveTasksWidget assignedTo={undefined} />
+      <TasksWidget assignedTo={undefined} />
 
       <AnimatedPresence show={(alerts?.length ?? 0) > 0}>
         <AlertSection alerts={(alerts ?? []).slice(0, 4)} />
@@ -166,11 +178,16 @@ function AdminDashboard() {
 }
 
 // ============================================================
-// ACTIVE TASKS WIDGET (shared between admin & staff dashboards)
+// INTERACTIVE TASKS WIDGET (shared between admin & staff)
 // ============================================================
 
-function ActiveTasksWidget({ assignedTo }: { assignedTo?: string }) {
+function TasksWidget({ assignedTo }: { assignedTo?: string }) {
+  const { user } = useAuth()
   const { tasks: allTasks } = useTasks()
+  const [showAddForm, setShowAddForm] = useState(false)
+  const [newTitle, setNewTitle] = useState("")
+  const [adding, setAdding] = useState(false)
+
   const activeTasks = allTasks.filter((t) => {
     if (t.status === "completed") return false
     if (assignedTo && t.assignedTo !== assignedTo) return false
@@ -184,40 +201,192 @@ function ActiveTasksWidget({ assignedTo }: { assignedTo?: string }) {
     low: "bg-muted-foreground/40",
   }
 
-  if (!activeTasks || activeTasks.length === 0) return null
-
   const sorted = [...activeTasks].sort((a, b) => {
     const po: Record<TaskPriority, number> = { urgent: 0, high: 1, medium: 2, low: 3 }
     return po[a.priority] - po[b.priority]
   })
 
+  async function handleToggleComplete(taskId: string) {
+    try {
+      await updateTaskStatus(taskId, "completed", user?.name)
+      toast.success("Task completed")
+    } catch {
+      toast.error("Failed to complete task")
+    }
+  }
+
+  async function handleAddTask() {
+    if (!newTitle.trim()) return
+    setAdding(true)
+    try {
+      await addTask({
+        title: newTitle.trim(),
+        priority: "medium",
+        status: "pending",
+        assignedTo: (user?.role as TaskAssignee) ?? "admin",
+        createdBy: user?.name ?? "Unknown",
+      })
+      setNewTitle("")
+      setShowAddForm(false)
+      toast.success("Task added")
+    } catch {
+      toast.error("Failed to add task")
+    } finally {
+      setAdding(false)
+    }
+  }
+
   return (
     <div className="rounded-xl border bg-card p-4 space-y-2">
-      <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
-        <ClipboardList className="h-3 w-3" />
-        Active Tasks ({activeTasks.length})
-      </h2>
-      <div className="space-y-1.5">
-        {sorted.slice(0, 4).map((task) => {
+      <div className="flex items-center justify-between">
+        <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+          <ClipboardList className="h-3 w-3" />
+          Tasks {activeTasks.length > 0 && `(${activeTasks.length})`}
+        </h2>
+        <button
+          onClick={() => setShowAddForm(!showAddForm)}
+          className="flex items-center gap-1 text-[10px] font-medium text-primary hover:text-primary/80 transition-colors"
+        >
+          <Plus className="h-3 w-3" />
+          Add
+        </button>
+      </div>
+
+      {/* Quick Add Form */}
+      <AnimatePresence>
+        {showAddForm && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden"
+          >
+            <div className="flex gap-2 pb-1">
+              <input
+                type="text"
+                value={newTitle}
+                onChange={(e) => setNewTitle(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleAddTask()}
+                placeholder="New task..."
+                autoFocus
+                className="flex-1 rounded-md border bg-background px-2.5 py-1.5 text-xs outline-none focus:ring-1 focus:ring-primary"
+              />
+              <button
+                onClick={handleAddTask}
+                disabled={adding || !newTitle.trim()}
+                className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-50"
+              >
+                {adding ? "..." : "Add"}
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Task List */}
+      <div className="space-y-1">
+        {sorted.length === 0 && !showAddForm && (
+          <p className="text-xs text-muted-foreground text-center py-3">No active tasks</p>
+        )}
+        {sorted.slice(0, 6).map((task) => {
           const isOverdue = !!task.dueDate && task.dueDate < new Date().toISOString().split("T")[0]
           return (
-            <div key={task.id} className="flex items-center gap-2.5 rounded-lg py-1">
-              <span className={`h-2 w-2 rounded-full shrink-0 ${priorityDotColor[task.priority]}`} />
-              <span className={`flex-1 text-sm font-medium truncate ${isOverdue ? "text-destructive" : ""}`}>
-                {task.title}
-              </span>
-              {task.dueDate && (
-                <span className={`text-xs shrink-0 ${isOverdue ? "text-destructive font-medium" : "text-muted-foreground"}`}>
-                  {isOverdue ? "Overdue" : formatDateShort(task.dueDate)}
+            <motion.div
+              key={task.id}
+              layout
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="flex items-start gap-2 rounded-lg py-1.5 group"
+            >
+              {/* Checkbox */}
+              <button
+                onClick={() => handleToggleComplete(task.id!)}
+                className="shrink-0 mt-0.5 text-muted-foreground hover:text-primary transition-colors"
+              >
+                <Square className="h-3.5 w-3.5" />
+              </button>
+
+              {/* Priority dot */}
+              <span className={`h-2 w-2 rounded-full shrink-0 mt-1.5 ${priorityDotColor[task.priority]}`} />
+
+              {/* Content */}
+              <div className="flex-1 min-w-0">
+                <span className={`text-sm font-medium leading-tight ${isOverdue ? "text-destructive" : ""}`}>
+                  {task.title}
                 </span>
-              )}
-            </div>
+                <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground mt-0.5">
+                  {task.createdBy && (
+                    <span>by {task.createdBy}</span>
+                  )}
+                  {task.dueDate && (
+                    <>
+                      <span>·</span>
+                      <span className={isOverdue ? "text-destructive font-medium" : ""}>
+                        {isOverdue ? "Overdue" : formatDateShort(task.dueDate)}
+                      </span>
+                    </>
+                  )}
+                </div>
+              </div>
+            </motion.div>
           )
         })}
-        {activeTasks.length > 4 && (
-          <p className="text-[10px] text-muted-foreground">+{activeTasks.length - 4} more</p>
+        {activeTasks.length > 6 && (
+          <p className="text-[10px] text-muted-foreground">+{activeTasks.length - 6} more</p>
         )}
       </div>
+
+      {/* Recently Completed (last 3) */}
+      <RecentlyCompleted assignedTo={assignedTo} />
+    </div>
+  )
+}
+
+function RecentlyCompleted({ assignedTo }: { assignedTo?: string }) {
+  const { tasks } = useTasks()
+  const { user } = useAuth()
+
+  const completed = tasks
+    .filter((t) => {
+      if (t.status !== "completed") return false
+      if (assignedTo && t.assignedTo !== assignedTo) return false
+      return true
+    })
+    .sort((a, b) => (b.completedAt ?? "").localeCompare(a.completedAt ?? ""))
+    .slice(0, 3)
+
+  if (completed.length === 0) return null
+
+  async function handleReopen(taskId: string) {
+    try {
+      await updateTaskStatus(taskId, "pending", undefined)
+      toast.success("Task reopened")
+    } catch {
+      toast.error("Failed to reopen task")
+    }
+  }
+
+  return (
+    <div className="pt-2 border-t space-y-1">
+      <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Recently Done</p>
+      {completed.map((task) => (
+        <div key={task.id} className="flex items-center gap-2 py-0.5 group">
+          <button
+            onClick={() => handleReopen(task.id!)}
+            className="shrink-0 text-green-500 hover:text-muted-foreground transition-colors"
+          >
+            <CheckSquare className="h-3.5 w-3.5" />
+          </button>
+          <span className="flex-1 text-xs text-muted-foreground line-through truncate">
+            {task.title}
+          </span>
+          {task.completedBy && (
+            <span className="text-[10px] text-muted-foreground/60 shrink-0">
+              by {task.completedBy}
+            </span>
+          )}
+        </div>
+      ))}
     </div>
   )
 }
@@ -275,7 +444,7 @@ function StaffDashboard() {
         </div>
       </AnimatedPresence>
 
-      <ActiveTasksWidget assignedTo="staff" />
+      <TasksWidget assignedTo="staff" />
 
       <AnimatedPresence show={(alerts?.length ?? 0) > 0}>
         <AlertSection alerts={(alerts ?? []).slice(0, 4)} />

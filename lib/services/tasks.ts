@@ -1,6 +1,6 @@
 import { supabase } from "@/lib/supabase/client"
 import { db } from "@/lib/db/client"
-import type { Task, TaskStatus, TaskAssignee } from "@/lib/db/schema"
+import type { Task, TaskStatus } from "@/lib/db/schema"
 
 // ============================================================
 // Task → Supabase row mapping
@@ -15,6 +15,7 @@ function taskToRow(data: Omit<Task, "id" | "createdAt" | "updatedAt">) {
     status: data.status,
     assigned_to: data.assignedTo,
     completed_at: data.completedAt ?? null,
+    completed_by: data.completedBy ?? null,
     created_by: data.createdBy,
   }
 }
@@ -49,6 +50,7 @@ export async function updateTask(
   if (data.status !== undefined) row.status = data.status
   if (data.assignedTo !== undefined) row.assigned_to = data.assignedTo
   if (data.completedAt !== undefined) row.completed_at = data.completedAt ?? null
+  if (data.completedBy !== undefined) row.completed_by = data.completedBy ?? null
 
   const { error } = await supabase.from("tasks").update(row).eq("id", id)
   if (error) throw new Error(`Failed to update task: ${error.message}`)
@@ -56,13 +58,15 @@ export async function updateTask(
 
 export async function updateTaskStatus(
   id: string,
-  status: TaskStatus
+  status: TaskStatus,
+  completedBy?: string
 ): Promise<void> {
   const now = new Date().toISOString()
   const row: Record<string, unknown> = {
     status,
     updated_at: now,
     completed_at: status === "completed" ? now : null,
+    completed_by: status === "completed" ? (completedBy ?? null) : null,
   }
 
   const { error } = await supabase.from("tasks").update(row).eq("id", id)
@@ -125,9 +129,10 @@ export async function fetchAllTasks(): Promise<Task[]> {
     dueDate: row.due_date ?? undefined,
     priority: row.priority as Task["priority"],
     status: row.status as TaskStatus,
-    assignedTo: row.assigned_to as TaskAssignee,
+    assignedTo: row.assigned_to as Task["assignedTo"],
     completedAt: row.completed_at ?? undefined,
-    createdBy: row.created_by as TaskAssignee,
+    completedBy: row.completed_by ?? undefined,
+    createdBy: row.created_by,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }))

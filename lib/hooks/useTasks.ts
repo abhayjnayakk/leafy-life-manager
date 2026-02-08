@@ -18,6 +18,7 @@ interface SupabaseTaskRow {
   status: string
   assigned_to: string
   completed_at: string | null
+  completed_by: string | null
   created_by: string
   created_at: string
   updated_at: string
@@ -33,7 +34,8 @@ function rowToTask(row: SupabaseTaskRow): Task {
     status: row.status as TaskStatus,
     assignedTo: row.assigned_to as TaskAssignee,
     completedAt: row.completed_at ?? undefined,
-    createdBy: row.created_by as TaskAssignee,
+    completedBy: row.completed_by ?? undefined,
+    createdBy: row.created_by,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }

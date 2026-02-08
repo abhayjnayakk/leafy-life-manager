@@ -1012,6 +1012,7 @@ function TasksSettings({ tasks, loading }: { tasks: Task[]; loading: boolean }) 
 }
 
 function TaskRow({ task, onEdit }: { task: Task; onEdit: () => void }) {
+  const { user } = useAuth()
   const isOverdue = !!task.dueDate && task.status !== "completed" &&
     task.dueDate < new Date().toISOString().split("T")[0]
 
@@ -1034,8 +1035,8 @@ function TaskRow({ task, onEdit }: { task: Task; onEdit: () => void }) {
       in_progress: "completed",
       completed: "pending",
     }
-    await updateTaskStatus(task.id!, next[task.status])
     const newStatus = next[task.status]
+    await updateTaskStatus(task.id!, newStatus, newStatus === "completed" ? user?.name : undefined)
     toast.success(
       newStatus === "completed" ? "Task completed" :
       newStatus === "in_progress" ? "Task in progress" : "Task reopened"
@@ -1061,10 +1062,14 @@ function TaskRow({ task, onEdit }: { task: Task; onEdit: () => void }) {
               {task.priority}
             </Badge>
             <span>{task.assignedTo}</span>
+            {task.createdBy && <span>by {task.createdBy}</span>}
             {task.dueDate && (
               <span className={isOverdue ? "text-destructive font-medium" : ""}>
                 {isOverdue ? "Overdue" : `Due ${formatDateShort(task.dueDate)}`}
               </span>
+            )}
+            {task.status === "completed" && task.completedBy && (
+              <span className="text-green-600">done by {task.completedBy}</span>
             )}
           </div>
         </div>
@@ -1110,8 +1115,9 @@ function TaskDialog({ task, onClose }: { task: Task | null; onClose: () => void 
           priority,
           status,
           assignedTo,
-          createdBy: (user?.role as TaskAssignee) ?? "admin",
+          createdBy: user?.name ?? "Unknown",
           completedAt: status === "completed" ? now : undefined,
+          completedBy: status === "completed" ? (user?.name ?? undefined) : undefined,
         })
         toast.success("Task added")
       } else {
@@ -1123,6 +1129,7 @@ function TaskDialog({ task, onClose }: { task: Task | null; onClose: () => void 
           status,
           assignedTo,
           completedAt: status === "completed" ? now : undefined,
+          completedBy: status === "completed" ? (user?.name ?? undefined) : undefined,
         })
         toast.success("Task updated")
       }

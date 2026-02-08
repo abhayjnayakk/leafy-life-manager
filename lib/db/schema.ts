@@ -272,7 +272,8 @@ export interface Task {
   status: TaskStatus
   assignedTo: TaskAssignee
   completedAt?: string
-  createdBy: TaskAssignee
+  completedBy?: string
+  createdBy: string
   createdAt: string
   updatedAt: string
 }
