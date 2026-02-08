@@ -18,6 +18,7 @@ const ADMIN_NAV = [
   { label: "Home", href: "/", icon: LayoutDashboard },
   { label: "Orders", href: "/orders", icon: ShoppingCart },
   { label: "Stock", href: "/inventory", icon: Package },
+  { label: "Recipes", href: "/recipes", icon: BookOpen },
   { label: "Finance", href: "/finance", icon: IndianRupee },
   { label: "Settings", href: "/settings", icon: Settings2 },
 ]
