@@ -124,10 +124,20 @@ export default function SettingsPage() {
   const { tasks, loading: tasksLoading } = useTasks()
 
   const [dangerPassword, setDangerPassword] = useState("")
-  const [dangerAction, setDangerAction] = useState<"reset" | "clearAlerts" | null>(null)
+  const [dangerAction, setDangerAction] = useState<string | null>(null)
   const [dangerError, setDangerError] = useState("")
 
   const DANGER_PASSWORD = "AbhayLifeLeafy@2026"
+
+  const DANGER_ACTIONS: { key: string; label: string; description: string; color?: string }[] = [
+    { key: "clearOrders", label: "Clear All Orders", description: "Removes all orders and daily revenue data" },
+    { key: "clearTasks", label: "Clear All Tasks", description: "Removes all tasks" },
+    { key: "clearRecipes", label: "Clear All Recipes", description: "Removes all recipes and recipe ingredients" },
+    { key: "clearAlerts", label: "Clear All Alerts", description: "Removes all alert history" },
+    { key: "clearLoginHistory", label: "Clear Login History", description: "Removes all login history records" },
+    { key: "resetInventory", label: "Reset Inventory Stock", description: "Resets all ingredient stock to 0" },
+    { key: "reset", label: "Reset Entire Database", description: "Deletes ALL data from every table", color: "destructive" },
+  ]
 
   async function executeDangerAction() {
     if (dangerPassword !== DANGER_PASSWORD) {
@@ -135,20 +145,63 @@ export default function SettingsPage() {
       return
     }
     setDangerError("")
-    if (dangerAction === "reset") {
-      // Clear all tables via Supabase
-      await Promise.all([
-        supabase.from("menu_items").delete().neq("id", ""),
-        supabase.from("ingredients").delete().neq("id", ""),
-        supabase.from("alert_rules").delete().neq("id", ""),
-        supabase.from("alerts").delete().neq("id", ""),
-        supabase.from("app_settings").delete().neq("id", ""),
-      ])
-      toast.success("Database reset complete")
-      window.location.reload()
-    } else if (dangerAction === "clearAlerts") {
-      await supabase.from("alerts").delete().neq("id", "")
-      toast.success("All alerts cleared")
+    try {
+      switch (dangerAction) {
+        case "clearOrders":
+          await supabase.from("orders").delete().neq("id", "")
+          await supabase.from("daily_revenue").delete().neq("id", "")
+          toast.success("All orders and revenue data cleared")
+          break
+        case "clearTasks":
+          await supabase.from("tasks").delete().neq("id", "")
+          toast.success("All tasks cleared")
+          break
+        case "clearRecipes":
+          await supabase.from("recipe_ingredients").delete().neq("id", "")
+          await supabase.from("recipes").delete().neq("id", "")
+          toast.success("All recipes cleared")
+          break
+        case "clearAlerts":
+          await supabase.from("alerts").delete().neq("id", "")
+          toast.success("All alerts cleared")
+          break
+        case "clearLoginHistory":
+          await supabase.from("login_history").delete().neq("id", "")
+          toast.success("Login history cleared")
+          break
+        case "resetInventory": {
+          const { data: allIngs } = await supabase.from("ingredients").select("id")
+          if (allIngs?.length) {
+            for (const ing of allIngs) {
+              await supabase.from("ingredients").update({ current_stock: 0 }).eq("id", ing.id)
+            }
+          }
+          toast.success(`Inventory reset — ${allIngs?.length || 0} ingredients set to 0`)
+          break
+        }
+        case "reset":
+          await Promise.all([
+            supabase.from("recipe_ingredients").delete().neq("id", ""),
+            supabase.from("recipes").delete().neq("id", ""),
+            supabase.from("orders").delete().neq("id", ""),
+            supabase.from("daily_revenue").delete().neq("id", ""),
+            supabase.from("menu_items").delete().neq("id", ""),
+            supabase.from("ingredients").delete().neq("id", ""),
+            supabase.from("alert_rules").delete().neq("id", ""),
+            supabase.from("alerts").delete().neq("id", ""),
+            supabase.from("app_settings").delete().neq("id", ""),
+            supabase.from("tasks").delete().neq("id", ""),
+            supabase.from("login_history").delete().neq("id", ""),
+            supabase.from("bowl_templates").delete().neq("id", ""),
+            supabase.from("bowl_components").delete().neq("id", ""),
+            supabase.from("expenses").delete().neq("id", ""),
+          ])
+          toast.success("Database reset complete")
+          window.location.reload()
+          break
+      }
+    } catch (err) {
+      toast.error("Action failed: " + (err as Error).message)
     }
     setDangerAction(null)
     setDangerPassword("")
@@ -222,44 +275,52 @@ export default function SettingsPage() {
       </StaggerGroup>
 
       {/* Danger Zone */}
-      <div className="rounded-xl border border-destructive/20 bg-destructive/5 p-4 space-y-2">
+      <div className="rounded-xl border border-destructive/20 bg-destructive/5 p-4 space-y-3">
         <h3 className="text-xs font-semibold text-destructive uppercase tracking-wider">
           Danger Zone
         </h3>
         {dangerAction === null ? (
-          <div className="flex items-center gap-3">
-            <Button
-              variant="outline"
-              size="sm"
-              className="text-destructive border-destructive/30 text-xs"
-              onClick={() => {
-                if (window.confirm("This will delete ALL data. Are you sure?")) {
-                  setDangerAction("reset")
-                  setDangerError("")
-                  setDangerPassword("")
-                }
-              }}
-            >
-              Reset Database
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="text-destructive border-destructive/30 text-xs"
-              onClick={() => {
-                setDangerAction("clearAlerts")
-                setDangerError("")
-                setDangerPassword("")
-              }}
-            >
-              Clear All Alerts
-            </Button>
+          <div className="space-y-2">
+            <div className="flex flex-wrap gap-2">
+              {DANGER_ACTIONS.map((action) => (
+                <Button
+                  key={action.key}
+                  variant="outline"
+                  size="sm"
+                  className={`text-xs ${
+                    action.color === "destructive"
+                      ? "text-destructive border-destructive/50 bg-destructive/10 hover:bg-destructive/20"
+                      : "text-destructive border-destructive/30"
+                  }`}
+                  onClick={() => {
+                    if (action.key === "reset") {
+                      if (!window.confirm("This will delete ALL data from every table. Are you absolutely sure?")) return
+                    }
+                    setDangerAction(action.key)
+                    setDangerError("")
+                    setDangerPassword("")
+                  }}
+                >
+                  {action.label}
+                </Button>
+              ))}
+            </div>
+            <p className="text-[10px] text-muted-foreground">
+              All actions require admin password confirmation. Use with caution.
+            </p>
           </div>
         ) : (
           <div className="space-y-2">
-            <p className="text-xs text-destructive font-medium">
-              Enter admin password to confirm{" "}
-              {dangerAction === "reset" ? "database reset" : "clearing all alerts"}:
+            <div className="rounded-lg bg-destructive/10 p-2.5">
+              <p className="text-xs font-medium text-destructive">
+                {DANGER_ACTIONS.find(a => a.key === dangerAction)?.label}
+              </p>
+              <p className="text-[10px] text-destructive/70 mt-0.5">
+                {DANGER_ACTIONS.find(a => a.key === dangerAction)?.description}
+              </p>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Enter admin password to confirm:
             </p>
             <div className="flex items-center gap-2">
               <Input
@@ -299,9 +360,6 @@ export default function SettingsPage() {
             )}
           </div>
         )}
-        <p className="text-xs text-muted-foreground">
-          Reset re-seeds fresh data. Clear alerts removes all alert history.
-        </p>
       </div>
     </AnimatedPage>
   )
