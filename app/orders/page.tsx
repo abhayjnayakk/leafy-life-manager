@@ -136,7 +136,7 @@ export default function OrdersPage() {
       backdateMode ? backdateDate : undefined,
       customerName.trim() || undefined,
       customerPhone.trim() || undefined,
-      user?.userId
+      user?.name
     )
     toast.success(`Order placed! ${formatINR(total)}`)
     setCart([])
