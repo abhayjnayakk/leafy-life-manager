@@ -1,8 +1,9 @@
 "use client"
 
-import { useState, useMemo } from "react"
-import { useLiveQuery } from "dexie-react-hooks"
-import { db } from "@/lib/db/client"
+import { useState, useMemo, useEffect } from "react"
+import { useSupaMenuItems } from "@/lib/hooks/useSupaMenuItems"
+import { useSupaIngredients } from "@/lib/hooks/useSupaIngredients"
+import { supabase } from "@/lib/supabase/client"
 import {
   ChevronDown,
   Plus,
@@ -147,20 +148,50 @@ function SkeletonCard() {
 // CUSTOM BOWL DISPLAY
 // ============================================================
 function CustomBowlDisplay({ type }: { type: "SaladBowl" | "RiceBowl" }) {
-  const template = useLiveQuery(
-    () => db.bowlTemplates.filter((t) => t.type === type).first(),
-    [type]
-  )
-  const components = useLiveQuery(
-    async () => {
-      if (!template?.id) return []
-      return db.bowlComponents
-        .where("bowlTemplateId")
-        .equals(template.id)
-        .sortBy("sortOrder")
-    },
-    [template?.id]
-  )
+  const [template, setTemplate] = useState<any>(null)
+  const [components, setComponents] = useState<any[]>([])
+
+  useEffect(() => {
+    async function fetchBowlData() {
+      const { data: templates } = await supabase
+        .from("bowl_templates")
+        .select("*")
+        .eq("type", type)
+        .limit(1)
+
+      if (!templates || templates.length === 0) return
+      const t = templates[0]
+      setTemplate({
+        id: t.id,
+        name: t.name,
+        type: t.type,
+        basePriceRegular: t.base_price_regular,
+        basePriceLarge: t.base_price_large,
+      })
+
+      const { data: comps } = await supabase
+        .from("bowl_components")
+        .select("*")
+        .eq("bowl_template_id", t.id)
+        .order("sort_order", { ascending: true })
+
+      if (comps) {
+        setComponents(
+          comps.map((c: any) => ({
+            id: c.id,
+            bowlTemplateId: c.bowl_template_id,
+            componentType: c.component_type,
+            name: c.name,
+            priceRegular: c.price_regular,
+            priceLarge: c.price_large,
+            isIncluded: c.is_included,
+            sortOrder: c.sort_order,
+          }))
+        )
+      }
+    }
+    fetchBowlData()
+  }, [type])
 
   if (!template || !components) return null
 
@@ -223,7 +254,7 @@ function CustomBowlDisplay({ type }: { type: "SaladBowl" | "RiceBowl" }) {
               </div>
             </div>
             <div className="ml-7 grid gap-1">
-              {items.map((item) => (
+              {items.map((item: any) => (
                 <div
                   key={item.id}
                   className="flex items-center justify-between rounded-lg border bg-background px-2.5 py-1.5 text-xs"
@@ -260,7 +291,7 @@ function CustomBowlDisplay({ type }: { type: "SaladBowl" | "RiceBowl" }) {
 // MAIN PAGE
 // ============================================================
 export default function RecipesPage() {
-  const [expandedItemId, setExpandedItemId] = useState<number | null>(null)
+  const [expandedItemId, setExpandedItemId] = useState<string | null>(null)
   const [addRecipeOpen, setAddRecipeOpen] = useState(false)
   const [addRecipeItem, setAddRecipeItem] = useState<MenuItem | null>(null)
   const [activeCategory, setActiveCategory] = useState<string>(
@@ -268,14 +299,37 @@ export default function RecipesPage() {
   )
   const [search, setSearch] = useState("")
 
-  const menuItems = useLiveQuery(() => db.menuItems.toArray(), [])
-  const allRecipes = useLiveQuery(() => db.recipes.toArray(), [])
+  const { menuItems: allMenuItems, loading: menuLoading } = useSupaMenuItems()
+  const menuItems = allMenuItems ?? []
+
+  const [allRecipes, setAllRecipes] = useState<Recipe[]>([])
+  useEffect(() => {
+    async function fetchRecipes() {
+      const { data } = await supabase.from("recipes").select("*")
+      if (data) {
+        setAllRecipes(
+          data.map((r: any) => ({
+            id: r.id,
+            menuItemId: r.menu_item_id,
+            name: r.name,
+            sizeVariant: r.size_variant,
+            preparationInstructions: r.preparation_instructions,
+            prepTimeMinutes: r.prep_time_minutes,
+            createdAt: r.created_at,
+            updatedAt: r.updated_at,
+          }))
+        )
+      }
+    }
+    fetchRecipes()
+  }, [])
 
   const recipeCounts = useMemo(() => {
     if (!allRecipes) return {}
-    const counts: Record<number, number> = {}
+    const counts: Record<string, number> = {}
     for (const r of allRecipes) {
-      counts[r.menuItemId] = (counts[r.menuItemId] || 0) + 1
+      const key = String(r.menuItemId)
+      counts[key] = (counts[key] || 0) + 1
     }
     return counts
   }, [allRecipes])
@@ -303,7 +357,7 @@ export default function RecipesPage() {
     )
   }, [currentItems, search])
 
-  const isLoading = menuItems === undefined
+  const isLoading = menuLoading
   const isCustomBowl =
     activeCategory === "Custom Salad Bowl" ||
     activeCategory === "Custom Rice Bowl"
@@ -425,11 +479,11 @@ export default function RecipesPage() {
             <StaggerItem key={item.id}>
               <MenuItemCard
                 item={item}
-                recipeCount={recipeCounts[item.id!] ?? 0}
-                expanded={expandedItemId === item.id}
+                recipeCount={recipeCounts[String(item.id!)] ?? 0}
+                expanded={expandedItemId === String(item.id)}
                 onToggle={() =>
                   setExpandedItemId(
-                    expandedItemId === item.id ? null : item.id!
+                    expandedItemId === String(item.id) ? null : String(item.id!)
                   )
                 }
                 onAddRecipe={() => {
@@ -471,13 +525,35 @@ function MenuItemCard({
   onToggle: () => void
   onAddRecipe: () => void
 }) {
-  const recipes = useLiveQuery(
-    () =>
-      expanded
-        ? db.recipes.where("menuItemId").equals(item.id!).toArray()
-        : Promise.resolve([] as Recipe[]),
-    [item.id, expanded]
-  )
+  const [recipes, setRecipes] = useState<Recipe[]>([])
+
+  useEffect(() => {
+    if (!expanded) {
+      setRecipes([])
+      return
+    }
+    async function fetchItemRecipes() {
+      const { data } = await supabase
+        .from("recipes")
+        .select("*")
+        .eq("menu_item_id", String(item.id!))
+      if (data) {
+        setRecipes(
+          data.map((r: any) => ({
+            id: r.id,
+            menuItemId: r.menu_item_id,
+            name: r.name,
+            sizeVariant: r.size_variant,
+            preparationInstructions: r.preparation_instructions,
+            prepTimeMinutes: r.prep_time_minutes,
+            createdAt: r.created_at,
+            updatedAt: r.updated_at,
+          }))
+        )
+      }
+    }
+    fetchItemRecipes()
+  }, [item.id, expanded])
 
   const content = RECIPE_CONTENT[item.name]
 
@@ -682,24 +758,53 @@ function MenuItemCard({
 // RECIPE CARD (DB stored recipes with quantities)
 // ============================================================
 function RecipeCard({ recipe }: { recipe: Recipe }) {
-  const ingredientsData = useLiveQuery(
-    async () => {
-      const recipeIngs = await db.recipeIngredients
-        .where("recipeId")
-        .equals(recipe.id!)
-        .toArray()
-      return Promise.all(
-        recipeIngs.map(async (ri) => {
-          const ing = await db.ingredients.get(ri.ingredientId)
-          return { ...ri, ingredient: ing }
-        })
+  const [ingredientsData, setIngredientsData] = useState<any[]>([])
+
+  useEffect(() => {
+    async function fetchRecipeIngredients() {
+      const { data: ris } = await supabase
+        .from("recipe_ingredients")
+        .select("*")
+        .eq("recipe_id", String(recipe.id!))
+      if (!ris) return
+
+      const ingredientIds = ris.map((ri: any) => ri.ingredient_id)
+      if (ingredientIds.length === 0) {
+        setIngredientsData([])
+        return
+      }
+
+      const { data: ings } = await supabase
+        .from("ingredients")
+        .select("*")
+        .in("id", ingredientIds)
+
+      const ingMap = new Map(
+        (ings ?? []).map((i: any) => [i.id, i])
       )
-    },
-    [recipe.id]
-  )
+
+      setIngredientsData(
+        ris.map((ri: any) => ({
+          id: ri.id,
+          recipeId: ri.recipe_id,
+          ingredientId: ri.ingredient_id,
+          quantity: ri.quantity,
+          unit: ri.unit,
+          isOptional: ri.is_optional,
+          ingredient: ingMap.get(ri.ingredient_id)
+            ? {
+                name: ingMap.get(ri.ingredient_id).name,
+                costPerUnit: Number(ingMap.get(ri.ingredient_id).cost_per_unit),
+              }
+            : undefined,
+        }))
+      )
+    }
+    fetchRecipeIngredients()
+  }, [recipe.id])
 
   const costPerServing = useMemo(() => {
-    if (!ingredientsData) return null
+    if (!ingredientsData || ingredientsData.length === 0) return null
     let total = 0
     for (const ri of ingredientsData) {
       if (ri.ingredient) {
@@ -748,7 +853,7 @@ function RecipeCard({ recipe }: { recipe: Recipe }) {
           size="sm"
           className="text-destructive h-6 w-6 p-0 rounded-lg shrink-0"
           onClick={async () => {
-            await deleteRecipe(recipe.id!)
+            await deleteRecipe(String(recipe.id!))
             toast.success("Recipe deleted")
           }}
         >
@@ -793,7 +898,7 @@ function AddRecipeDialog({
   )
   const [recipeIngredients, setRecipeIngredients] = useState<
     Array<{
-      ingredientId: number
+      ingredientId: string
       quantity: number
       unit: IngredientUnit
       isOptional: boolean
@@ -804,16 +909,13 @@ function AddRecipeDialog({
   const [selUnit, setSelUnit] = useState<IngredientUnit>("g")
   const [selOptional, setSelOptional] = useState(false)
 
-  const allIngredients = useLiveQuery(() =>
-    db.ingredients.orderBy("name").toArray(),
-    []
-  )
+  const { ingredients: allIngredients } = useSupaIngredients()
 
   const estimatedCost = useMemo(() => {
     if (!allIngredients) return 0
     let total = 0
     for (const ri of recipeIngredients) {
-      const ing = allIngredients.find((i) => i.id === ri.ingredientId)
+      const ing = allIngredients.find((i) => String(i.id) === ri.ingredientId)
       if (ing) total += ri.quantity * ing.costPerUnit
     }
     return total
@@ -825,7 +927,7 @@ function AddRecipeDialog({
     if (isNaN(qty) || qty <= 0) return
     if (
       recipeIngredients.some(
-        (ri) => ri.ingredientId === parseInt(selIngId)
+        (ri) => ri.ingredientId === selIngId
       )
     ) {
       toast.error("Ingredient already added")
@@ -834,7 +936,7 @@ function AddRecipeDialog({
     setRecipeIngredients((prev) => [
       ...prev,
       {
-        ingredientId: parseInt(selIngId),
+        ingredientId: selIngId,
         quantity: qty,
         unit: selUnit,
         isOptional: selOptional,
@@ -852,7 +954,7 @@ function AddRecipeDialog({
     }
     const pt = prepTime ? parseInt(prepTime) : undefined
     const recipeId = await addRecipe({
-      menuItemId: menuItem.id!,
+      menuItemId: String(menuItem.id!),
       name: name.trim(),
       sizeVariant: sizeVariant as any,
       preparationInstructions: instructions.trim() || undefined,
@@ -1007,7 +1109,7 @@ function AddRecipeDialog({
               <div className="flex flex-wrap gap-1.5">
                 {recipeIngredients.map((ri, idx) => {
                   const ing = (allIngredients ?? []).find(
-                    (i) => i.id === ri.ingredientId
+                    (i) => String(i.id) === ri.ingredientId
                   )
                   return (
                     <span

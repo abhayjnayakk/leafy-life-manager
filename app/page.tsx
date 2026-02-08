@@ -1,13 +1,15 @@
 "use client"
 
-import { useLiveQuery } from "dexie-react-hooks"
-import { db } from "@/lib/db/client"
+import { useMemo } from "react"
 import { formatINR, formatPercent } from "@/lib/format"
 import {
   useMonthlyRevenueShareStatus,
   useWeeklyRevenue,
   useTodayRevenue,
 } from "@/lib/hooks/useFinance"
+import { useSupaIngredients } from "@/lib/hooks/useSupaIngredients"
+import { useSupaAlerts } from "@/lib/hooks/useSupaAlerts"
+import { useSupaOrders } from "@/lib/hooks/useSupaOrders"
 import { useAuth } from "@/lib/auth"
 import { Check, AlertTriangle, AlertCircle, Info, TrendingUp, ClipboardList } from "lucide-react"
 import { resolveAlert } from "@/lib/services/alertEngine"
@@ -44,24 +46,27 @@ function AdminDashboard() {
   const revenueShare = useMonthlyRevenueShareStatus()
   const weeklyRevenue = useWeeklyRevenue()
 
-  const lowStockCount = useLiveQuery(
-    () => db.ingredients.filter((i) => i.currentStock <= i.minimumThreshold).count(),
-    []
-  )
-  const alerts = useLiveQuery(
-    () => db.alerts.filter((a) => !a.resolvedAt).reverse().toArray(),
-    []
+  const { ingredients } = useSupaIngredients()
+  const lowStockCount = useMemo(
+    () => ingredients.filter((i) => i.currentStock <= i.minimumThreshold).length,
+    [ingredients]
   )
 
-  const todayStr = new Date().toISOString().split("T")[0]
-  const topItems = useLiveQuery(async () => {
+  const { alerts: allAlerts } = useSupaAlerts()
+  const alerts = useMemo(
+    () => allAlerts.filter((a) => !a.resolvedAt),
+    [allAlerts]
+  )
+
+  const { orders } = useSupaOrders()
+  const topItems = useMemo(() => {
     const today = new Date()
     const monthStart = new Date(today.getFullYear(), today.getMonth(), 1)
       .toISOString().split("T")[0]
-    const orders = await db.orders
-      .where("date").between(monthStart, todayStr, true, true).toArray()
+    const todayStr = today.toISOString().split("T")[0]
+    const monthOrders = orders.filter((o) => o.date >= monthStart && o.date <= todayStr)
     const counts: Record<string, { name: string; count: number; revenue: number }> = {}
-    for (const order of orders) {
+    for (const order of monthOrders) {
       for (const item of order.items) {
         const key = item.menuItemName
         if (!counts[key]) counts[key] = { name: key, count: 0, revenue: 0 }
@@ -70,7 +75,7 @@ function AdminDashboard() {
       }
     }
     return Object.values(counts).sort((a, b) => b.count - a.count).slice(0, 3)
-  }, [todayStr])
+  }, [orders])
 
   return (
     <AnimatedPage className="space-y-4">
@@ -223,14 +228,17 @@ function ActiveTasksWidget({ assignedTo }: { assignedTo?: string }) {
 
 function StaffDashboard() {
   const todayRevenue = useTodayRevenue()
-  const lowStockItems = useLiveQuery(() =>
-    db.ingredients.filter((i) => i.currentStock <= i.minimumThreshold).toArray(),
-    []
+
+  const { ingredients } = useSupaIngredients()
+  const lowStockItems = useMemo(
+    () => ingredients.filter((i) => i.currentStock <= i.minimumThreshold),
+    [ingredients]
   )
-  const alerts = useLiveQuery(() =>
-    db.alerts.filter((a) => !a.resolvedAt && (a.type === "LowStock" || a.type === "ExpiryWarning" || a.type === "TaskDue"))
-      .reverse().toArray(),
-    []
+
+  const { alerts: allAlerts } = useSupaAlerts()
+  const alerts = useMemo(
+    () => allAlerts.filter((a) => !a.resolvedAt && (a.type === "LowStock" || a.type === "ExpiryWarning" || a.type === "TaskDue")),
+    [allAlerts]
   )
 
   return (
@@ -315,7 +323,7 @@ function AlertCard({ alert }: { alert: Alert }) {
       className="flex items-center gap-2.5 rounded-lg py-1.5 group">
       {icons[alert.severity]}
       <span className="flex-1 text-sm font-medium truncate">{alert.title}</span>
-      <button onClick={() => resolveAlert(alert.id!)}
+      <button onClick={() => resolveAlert(String(alert.id!))}
         className="opacity-0 group-hover:opacity-100 transition-opacity rounded-md p-1 hover:bg-muted">
         <Check className="h-3.5 w-3.5 text-muted-foreground" />
       </button>

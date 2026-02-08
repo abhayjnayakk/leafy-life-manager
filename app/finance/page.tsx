@@ -1,8 +1,8 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { useLiveQuery } from "dexie-react-hooks"
-import { db } from "@/lib/db/client"
+import { useState, useEffect, useMemo } from "react"
+import { useSupaExpenses } from "@/lib/hooks/useSupaExpenses"
+import { supabase } from "@/lib/supabase/client"
 import { Plus, ChevronLeft, ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -58,19 +58,19 @@ export default function FinancePage() {
   const revenueShare = useMonthlyRevenueShareStatus()
   const weeklyRevenue = useWeeklyRevenue()
 
-  const monthExpenses = useLiveQuery(() => {
+  const { expenses: allExpenses } = useSupaExpenses()
+
+  const monthExpenses = useMemo(() => {
     const [y, m] = selectedMonth.split("-").map(Number)
     const start = format(new Date(y, m - 1, 1), "yyyy-MM-dd")
     const end = format(new Date(y, m, 0), "yyyy-MM-dd")
-    return db.expenses
-      .where("date")
-      .between(start, end, true, true)
-      .reverse()
-      .toArray()
-  }, [selectedMonth])
+    return (allExpenses ?? [])
+      .filter((exp) => exp.date >= start && exp.date <= end)
+      .sort((a, b) => b.date.localeCompare(a.date))
+  }, [allExpenses, selectedMonth])
 
   // Use stable signal (expense count) instead of array reference to avoid re-render loop
-  const expenseCount = monthExpenses?.length ?? 0
+  const expenseCount = monthExpenses.length
   useEffect(() => {
     const [y, m] = selectedMonth.split("-").map(Number)
     calculateMonthlyPnL(y, m - 1).then(setPnl)
@@ -252,7 +252,7 @@ export default function FinancePage() {
                 </h2>
                 <span className="text-lg font-bold mt-1 block">
                   {formatINR(
-                    (monthExpenses ?? []).reduce((s, e) => s + e.amount, 0)
+                    monthExpenses.reduce((s, e) => s + e.amount, 0)
                   )}
                 </span>
               </div>
@@ -265,13 +265,13 @@ export default function FinancePage() {
             </button>
             <AnimatedCollapse open={expensesOpen}>
               <div className="px-5 pb-5 space-y-2">
-                {(monthExpenses ?? []).length === 0 ? (
+                {monthExpenses.length === 0 ? (
                   <div className="text-center py-6 text-muted-foreground text-sm">
                     No expenses recorded for this month
                   </div>
                 ) : (
                   <>
-                    {(monthExpenses ?? []).map((exp) => (
+                    {monthExpenses.map((exp) => (
                       <div
                         key={exp.id}
                         className="rounded-xl border p-3 flex items-center justify-between"
@@ -398,15 +398,19 @@ function AddExpenseForm({ onSuccess }: { onSuccess: () => void }) {
     e.preventDefault()
     if (!description.trim() || !amount) return
     const now = new Date().toISOString()
-    await db.expenses.add({
+    const { error } = await supabase.from("expenses").insert({
       date,
       category,
       description: description.trim(),
       amount: parseFloat(amount),
-      isRecurring: false,
-      createdAt: now,
-      updatedAt: now,
+      is_recurring: false,
+      created_at: now,
+      updated_at: now,
     })
+    if (error) {
+      toast.error(`Failed to add expense: ${error.message}`)
+      return
+    }
     toast.success("Expense added")
     onSuccess()
   }

@@ -5,6 +5,7 @@ import { seedDatabase, migrateIngredientDefaults } from "@/lib/db/seed"
 import { runAlertEngine } from "@/lib/services/alertEngine"
 import { db } from "@/lib/db/client"
 import { supabase } from "@/lib/supabase/client"
+import { migrateAllDataToSupabase } from "@/lib/supabase/migrate"
 
 // One-time migrate local Dexie tasks → Supabase
 async function migrateLocalTasksToSupabase() {
@@ -49,6 +50,7 @@ export function DexieProvider({ children }: { children: ReactNode }) {
     seedDatabase()
       .then(() => migrateIngredientDefaults())
       .then(() => migrateLocalTasksToSupabase())
+      .then(() => migrateAllDataToSupabase())
       .then(() => runAlertEngine())
       .then(() => setReady(true))
       .catch((err) => {

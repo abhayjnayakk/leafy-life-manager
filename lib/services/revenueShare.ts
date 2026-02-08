@@ -1,4 +1,4 @@
-import { db } from "@/lib/db/client"
+import { supabase } from "@/lib/supabase/client"
 import { startOfMonth, endOfMonth, format, eachDayOfInterval } from "date-fns"
 
 export interface RevenueShareResult {
@@ -21,26 +21,33 @@ export async function calculateRevenueShare(
   const monthStr = format(monthStart, "yyyy-MM")
 
   const days = eachDayOfInterval({ start: monthStart, end: monthEnd })
-  const dateStrings = days.map((d) => format(d, "yyyy-MM-dd"))
+  const startDate = format(days[0], "yyyy-MM-dd")
+  const endDate = format(days[days.length - 1], "yyyy-MM-dd")
 
-  const dailyRecords = await db.dailyRevenue
-    .where("date")
-    .anyOf(dateStrings)
-    .toArray()
+  const { data: dailyRecords, error: revError } = await supabase
+    .from("daily_revenue")
+    .select("*")
+    .gte("date", startDate)
+    .lte("date", endDate)
 
-  const totalMonthlyRevenue = dailyRecords.reduce(
-    (sum, record) => sum + record.totalSales,
+  if (revError) throw new Error(`Failed to fetch daily revenue: ${revError.message}`)
+
+  const totalMonthlyRevenue = (dailyRecords ?? []).reduce(
+    (sum, record) => sum + record.total_sales,
     0
   )
 
-  const minGuaranteeSetting = await db.appSettings
-    .where("key")
-    .equals("minimumGuaranteeRent")
-    .first()
-  const revenueShareSetting = await db.appSettings
-    .where("key")
-    .equals("revenueSharePercent")
-    .first()
+  const { data: minGuaranteeSetting } = await supabase
+    .from("app_settings")
+    .select("value")
+    .eq("key", "minimumGuaranteeRent")
+    .single()
+
+  const { data: revenueShareSetting } = await supabase
+    .from("app_settings")
+    .select("value")
+    .eq("key", "revenueSharePercent")
+    .single()
 
   const minimumGuarantee = minGuaranteeSetting
     ? JSON.parse(minGuaranteeSetting.value)

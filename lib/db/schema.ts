@@ -29,7 +29,7 @@ export type MenuCategory =
 
 export type SizeOption = "Regular" | "Large" | "Single"
 
-export type OrderType = "DineIn" | "Delivery"
+export type OrderType = "DineIn" | "Delivery" | "Takeaway"
 
 export type PaymentMethod = "Cash" | "UPI" | "Card"
 
@@ -70,11 +70,12 @@ export type AlertRuleCondition =
 export type BowlComponentType = "Base" | "Protein" | "Vegetable" | "Dressing" | "Topping"
 
 // ============================================================
-// TABLE INTERFACES
+// TABLE INTERFACES — IDs are string (UUID from Supabase)
+// Dexie still uses number IDs for local tables during migration
 // ============================================================
 
 export interface Ingredient {
-  id?: number
+  id?: number | string
   name: string
   category: IngredientCategory
   unit: IngredientUnit
@@ -95,10 +96,11 @@ export interface MenuItemSize {
   size: SizeOption
   price: number // Delivery price (original)
   dineInPrice: number // DineIn price (price - 30)
+  takeawayPrice?: number // Takeaway price (price + 10)
 }
 
 export interface MenuItem {
-  id?: number
+  id?: number | string
   name: string
   category: MenuCategory
   description?: string
@@ -110,8 +112,8 @@ export interface MenuItem {
 }
 
 export interface Recipe {
-  id?: number
-  menuItemId: number
+  id?: number | string
+  menuItemId: number | string
   name: string
   sizeVariant?: SizeOption
   preparationInstructions?: string
@@ -121,9 +123,9 @@ export interface Recipe {
 }
 
 export interface RecipeIngredient {
-  id?: number
-  recipeId: number
-  ingredientId: number
+  id?: number | string
+  recipeId: number | string
+  ingredientId: number | string
   quantity: number
   unit: IngredientUnit
   isOptional: boolean
@@ -132,7 +134,7 @@ export interface RecipeIngredient {
 }
 
 export interface BowlTemplate {
-  id?: number
+  id?: number | string
   name: string
   type: "SaladBowl" | "RiceBowl"
   basePriceRegular: number
@@ -142,8 +144,8 @@ export interface BowlTemplate {
 }
 
 export interface BowlComponent {
-  id?: number
-  bowlTemplateId: number
+  id?: number | string
+  bowlTemplateId: number | string
   componentType: BowlComponentType
   name: string
   priceRegular: number
@@ -154,7 +156,7 @@ export interface BowlComponent {
 }
 
 export interface OrderItem {
-  menuItemId: number
+  menuItemId: number | string
   menuItemName: string
   size: SizeOption
   quantity: number
@@ -175,7 +177,7 @@ export interface CustomBowlSelection {
 }
 
 export interface Order {
-  id?: number
+  id?: number | string
   orderNumber: string
   orderType: OrderType
   date: string
@@ -185,11 +187,14 @@ export interface Order {
   totalAmount: number
   paymentMethod: PaymentMethod
   notes?: string
+  customerName?: string
+  customerPhone?: string
+  createdBy?: string
   createdAt: string
 }
 
 export interface DailyRevenue {
-  id?: number
+  id?: number | string
   date: string
   totalSales: number
   numberOfOrders: number
@@ -204,7 +209,7 @@ export interface DailyRevenue {
 }
 
 export interface Expense {
-  id?: number
+  id?: number | string
   date: string
   category: ExpenseCategory
   description: string
@@ -217,7 +222,7 @@ export interface Expense {
 }
 
 export interface Alert {
-  id?: number
+  id?: number | string
   type: AlertType
   severity: AlertSeverity
   title: string
@@ -230,7 +235,7 @@ export interface Alert {
 }
 
 export interface AlertRule {
-  id?: number
+  id?: number | string
   name: string
   type: AlertType
   condition: AlertRuleCondition
@@ -242,7 +247,7 @@ export interface AlertRule {
 }
 
 export interface AppSettings {
-  id?: number
+  id?: number | string
   key: string
   value: string
   updatedAt: string

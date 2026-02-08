@@ -1,8 +1,12 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useLiveQuery } from "dexie-react-hooks"
-import { db } from "@/lib/db/client"
+import { useSupaMenuItems } from "@/lib/hooks/useSupaMenuItems"
+import { useSupaIngredients } from "@/lib/hooks/useSupaIngredients"
+import { useSupaAlertRules } from "@/lib/hooks/useSupaAlertRules"
+import { useSupaAppSettings } from "@/lib/hooks/useSupaAppSettings"
+import { useLoginHistory } from "@/lib/hooks/useLoginHistory"
+import { supabase } from "@/lib/supabase/client"
 import {
   Plus,
   Trash2,
@@ -17,6 +21,7 @@ import {
   ClipboardList,
   Clock,
   CheckCircle2,
+  History,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -113,10 +118,41 @@ function SettingsSection({
 // ============================================================
 
 export default function SettingsPage() {
-  const menuItems = useLiveQuery(() => db.menuItems.toArray(), [])
-  const ingredients = useLiveQuery(() => db.ingredients.orderBy("name").toArray(), [])
-  const rules = useLiveQuery(() => db.alertRules.toArray(), [])
+  const { menuItems } = useSupaMenuItems()
+  const { ingredients } = useSupaIngredients()
+  const { alertRules } = useSupaAlertRules()
   const { tasks, loading: tasksLoading } = useTasks()
+
+  const [dangerPassword, setDangerPassword] = useState("")
+  const [dangerAction, setDangerAction] = useState<"reset" | "clearAlerts" | null>(null)
+  const [dangerError, setDangerError] = useState("")
+
+  const DANGER_PASSWORD = "AbhayLifeLeafy@2026"
+
+  async function executeDangerAction() {
+    if (dangerPassword !== DANGER_PASSWORD) {
+      setDangerError("Incorrect password")
+      return
+    }
+    setDangerError("")
+    if (dangerAction === "reset") {
+      // Clear all tables via Supabase
+      await Promise.all([
+        supabase.from("menu_items").delete().neq("id", ""),
+        supabase.from("ingredients").delete().neq("id", ""),
+        supabase.from("alert_rules").delete().neq("id", ""),
+        supabase.from("alerts").delete().neq("id", ""),
+        supabase.from("app_settings").delete().neq("id", ""),
+      ])
+      toast.success("Database reset complete")
+      window.location.reload()
+    } else if (dangerAction === "clearAlerts") {
+      await supabase.from("alerts").delete().neq("id", "")
+      toast.success("All alerts cleared")
+    }
+    setDangerAction(null)
+    setDangerPassword("")
+  }
 
   return (
     <AnimatedPage className="space-y-3 pb-24">
@@ -142,9 +178,9 @@ export default function SettingsPage() {
           <SettingsSection
             icon={UtensilsCrossed}
             title="Menu Items"
-            count={menuItems?.length ?? 0}
+            count={menuItems.length}
           >
-            <MenuSettings items={menuItems ?? []} />
+            <MenuSettings items={menuItems} />
           </SettingsSection>
         </StaggerItem>
 
@@ -152,9 +188,9 @@ export default function SettingsPage() {
           <SettingsSection
             icon={Leaf}
             title="Ingredients"
-            count={ingredients?.length ?? 0}
+            count={ingredients.length}
           >
-            <IngredientsSettings ingredients={ingredients ?? []} />
+            <IngredientsSettings ingredients={ingredients} />
           </SettingsSection>
         </StaggerItem>
 
@@ -169,12 +205,18 @@ export default function SettingsPage() {
         </StaggerItem>
 
         <StaggerItem>
+          <SettingsSection icon={History} title="Login History">
+            <LoginHistorySettings />
+          </SettingsSection>
+        </StaggerItem>
+
+        <StaggerItem>
           <SettingsSection
             icon={BellRing}
             title="Alert Rules"
-            count={rules?.length ?? 0}
+            count={alertRules.length}
           >
-            <AlertRulesSettings rules={rules ?? []} />
+            <AlertRulesSettings rules={alertRules} />
           </SettingsSection>
         </StaggerItem>
       </StaggerGroup>
@@ -184,36 +226,79 @@ export default function SettingsPage() {
         <h3 className="text-xs font-semibold text-destructive uppercase tracking-wider">
           Danger Zone
         </h3>
-        <div className="flex items-center gap-3">
-          <Button
-            variant="outline"
-            size="sm"
-            className="text-destructive border-destructive/30 text-xs"
-            onClick={async () => {
-              if (
-                window.confirm(
-                  "This will delete ALL data and re-seed. Are you sure?"
-                )
-              ) {
-                await db.delete()
-                window.location.reload()
-              }
-            }}
-          >
-            Reset Database
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="text-destructive border-destructive/30 text-xs"
-            onClick={async () => {
-              await db.alerts.clear()
-              toast.success("All alerts cleared")
-            }}
-          >
-            Clear All Alerts
-          </Button>
-        </div>
+        {dangerAction === null ? (
+          <div className="flex items-center gap-3">
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-destructive border-destructive/30 text-xs"
+              onClick={() => {
+                if (window.confirm("This will delete ALL data. Are you sure?")) {
+                  setDangerAction("reset")
+                  setDangerError("")
+                  setDangerPassword("")
+                }
+              }}
+            >
+              Reset Database
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-destructive border-destructive/30 text-xs"
+              onClick={() => {
+                setDangerAction("clearAlerts")
+                setDangerError("")
+                setDangerPassword("")
+              }}
+            >
+              Clear All Alerts
+            </Button>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <p className="text-xs text-destructive font-medium">
+              Enter admin password to confirm{" "}
+              {dangerAction === "reset" ? "database reset" : "clearing all alerts"}:
+            </p>
+            <div className="flex items-center gap-2">
+              <Input
+                type="password"
+                placeholder="Admin password"
+                value={dangerPassword}
+                onChange={(e) => {
+                  setDangerPassword(e.target.value)
+                  setDangerError("")
+                }}
+                className="h-8 text-xs max-w-xs"
+                autoFocus
+              />
+              <Button
+                variant="destructive"
+                size="sm"
+                className="text-xs h-8"
+                onClick={executeDangerAction}
+              >
+                Confirm
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-xs h-8"
+                onClick={() => {
+                  setDangerAction(null)
+                  setDangerPassword("")
+                  setDangerError("")
+                }}
+              >
+                Cancel
+              </Button>
+            </div>
+            {dangerError && (
+              <p className="text-xs text-destructive">{dangerError}</p>
+            )}
+          </div>
+        )}
         <p className="text-xs text-muted-foreground">
           Reset re-seeds fresh data. Clear alerts removes all alert history.
         </p>
@@ -223,14 +308,83 @@ export default function SettingsPage() {
 }
 
 // ============================================================
+// LOGIN HISTORY SETTINGS
+// ============================================================
+
+function LoginHistorySettings() {
+  const { history, loading } = useLoginHistory(20)
+
+  function formatLoginDate(iso: string) {
+    const d = new Date(iso)
+    return d.toLocaleDateString("en-IN", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    })
+  }
+
+  if (loading) {
+    return (
+      <p className="text-xs text-muted-foreground text-center py-6">
+        Loading login history...
+      </p>
+    )
+  }
+
+  if (history.length === 0) {
+    return (
+      <p className="text-xs text-muted-foreground text-center py-6">
+        No login history found
+      </p>
+    )
+  }
+
+  return (
+    <div className="space-y-1 pt-2 max-h-[50vh] overflow-y-auto">
+      {history.map((rec) => (
+        <div
+          key={rec.id}
+          className="flex items-center justify-between rounded-lg border px-3 py-2"
+        >
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-medium">{rec.userName}</span>
+              <Badge variant="secondary" className="text-[10px] h-4 px-1">
+                {rec.role}
+              </Badge>
+            </div>
+            <div className="text-[10px] text-muted-foreground mt-0.5">
+              {formatLoginDate(rec.loginAt)}
+            </div>
+          </div>
+          <div className="shrink-0">
+            {rec.logoutAt ? (
+              <Badge variant="outline" className="text-[10px] h-5 px-1.5">
+                {formatLoginDate(rec.logoutAt)}
+              </Badge>
+            ) : (
+              <Badge className="text-[10px] h-5 px-1.5 bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">
+                Active
+              </Badge>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ============================================================
 // BUSINESS SETTINGS
 // ============================================================
 
 function BusinessSettings() {
-  const settings = useLiveQuery(() => db.appSettings.toArray(), [])
+  const { settings, loading: settingsLoading, setSetting } = useSupaAppSettings()
 
   const getVal = (key: string) => {
-    const s = (settings ?? []).find((s) => s.key === key)
+    const s = settings.find((s) => s.key === key)
     if (!s) return ""
     try {
       return JSON.parse(s.value)
@@ -246,7 +400,7 @@ function BusinessSettings() {
   const [loaded, setLoaded] = useState(false)
 
   useEffect(() => {
-    if (settings && !loaded) {
+    if (settings.length > 0 && !loaded) {
       setBusinessName(getVal("businessName") || "Leafy Life")
       setMinGuarantee(String(getVal("minimumGuaranteeRent") || 18000))
       setRevenueShare(String(getVal("revenueSharePercent") || 20))
@@ -257,7 +411,6 @@ function BusinessSettings() {
   }, [settings, loaded])
 
   async function handleSave() {
-    const now = new Date().toISOString()
     const updates = [
       { key: "businessName", value: JSON.stringify(businessName) },
       { key: "minimumGuaranteeRent", value: JSON.stringify(Number(minGuarantee)) },
@@ -265,12 +418,7 @@ function BusinessSettings() {
       { key: "securityDeposit", value: JSON.stringify(Number(deposit)) },
     ]
     for (const u of updates) {
-      const existing = await db.appSettings.where("key").equals(u.key).first()
-      if (existing) {
-        await db.appSettings.update(existing.id!, { value: u.value, updatedAt: now })
-      } else {
-        await db.appSettings.add({ ...u, updatedAt: now })
-      }
+      await setSetting(u.key, u.value)
     }
     toast.success("Settings saved")
   }
@@ -338,6 +486,7 @@ function MenuSettings({ items }: { items: MenuItem[] }) {
   const [editItem, setEditItem] = useState<MenuItem | null>(null)
   const [addOpen, setAddOpen] = useState(false)
   const [expandedCat, setExpandedCat] = useState<string | null>(null)
+  const { deleteMenuItem } = useSupaMenuItems()
 
   const grouped = items.reduce(
     (acc, item) => {
@@ -412,7 +561,7 @@ function MenuSettings({ items }: { items: MenuItem[] }) {
                           size="sm"
                           className="h-6 w-6 p-0 text-destructive"
                           onClick={async () => {
-                            await db.menuItems.delete(item.id!)
+                            await deleteMenuItem(String(item.id!))
                             toast.success("Deleted")
                           }}
                         >
@@ -442,6 +591,7 @@ function MenuItemDialog({
   onClose: () => void
 }) {
   const isNew = item === null
+  const { addMenuItem, updateMenuItem } = useSupaMenuItems()
   const [name, setName] = useState(item?.name ?? "")
   const [description, setDescription] = useState(item?.description ?? "")
   const [category, setCategory] = useState<MenuCategory>(item?.category ?? "Salads")
@@ -461,7 +611,6 @@ function MenuItemDialog({
 
   async function handleSave() {
     if (!name.trim()) return
-    const now = new Date().toISOString()
     const data = {
       name: name.trim(),
       description: description.trim(),
@@ -469,13 +618,12 @@ function MenuItemDialog({
       sizes,
       isActive,
       isCustomizable,
-      updatedAt: now,
     }
     if (isNew) {
-      await db.menuItems.add({ ...data, createdAt: now })
+      await addMenuItem(data)
       toast.success("Item added")
     } else {
-      await db.menuItems.update(item!.id!, data)
+      await updateMenuItem(String(item!.id!), data)
       toast.success("Item updated")
     }
     onClose()
@@ -625,6 +773,7 @@ function IngredientsSettings({ ingredients }: { ingredients: Ingredient[] }) {
   const [editIng, setEditIng] = useState<Ingredient | null>(null)
   const [addOpen, setAddOpen] = useState(false)
   const [search, setSearch] = useState("")
+  const { deleteIngredient } = useSupaIngredients()
 
   const filtered = ingredients.filter(
     (i) =>
@@ -674,7 +823,7 @@ function IngredientsSettings({ ingredients }: { ingredients: Ingredient[] }) {
                 size="sm"
                 className="h-6 w-6 p-0 text-destructive"
                 onClick={async () => {
-                  await db.ingredients.delete(ing.id!)
+                  await deleteIngredient(String(ing.id!))
                   toast.success("Deleted")
                 }}
               >
@@ -704,6 +853,7 @@ function IngredientDialog({
   onClose: () => void
 }) {
   const isNew = ingredient === null
+  const { addIngredient, updateIngredient } = useSupaIngredients()
   const [name, setName] = useState(ingredient?.name ?? "")
   const [category, setCategory] = useState<IngredientCategory>(ingredient?.category ?? "Vegetables")
   const [unit, setUnit] = useState<IngredientUnit>(ingredient?.unit ?? "kg")
@@ -714,7 +864,6 @@ function IngredientDialog({
 
   async function handleSave() {
     if (!name.trim()) return
-    const now = new Date().toISOString()
     const data = {
       name: name.trim(),
       category,
@@ -723,13 +872,12 @@ function IngredientDialog({
       minimumThreshold: Number(threshold),
       costPerUnit: Number(cost),
       supplier: supplier.trim() || undefined,
-      updatedAt: now,
     }
     if (isNew) {
-      await db.ingredients.add({ ...data, createdAt: now })
+      await addIngredient(data)
       toast.success("Added")
     } else {
-      await db.ingredients.update(ingredient!.id!, data)
+      await updateIngredient(String(ingredient!.id!), data)
       toast.success("Updated")
     }
     onClose()
@@ -1059,7 +1207,7 @@ function TaskDialog({ task, onClose }: { task: Task | null; onClose: () => void 
 // ============================================================
 
 function AlertRulesSettings({ rules }: { rules: Array<{
-  id?: number
+  id?: number | string
   name: string
   type: string
   condition: string
@@ -1067,26 +1215,21 @@ function AlertRulesSettings({ rules }: { rules: Array<{
   isActive: boolean
 }> }) {
   const [createOpen, setCreateOpen] = useState(false)
+  const { updateAlertRule, deleteAlertRule } = useSupaAlertRules()
 
-  async function toggleRule(id: number, isActive: boolean) {
-    await db.alertRules.update(id, {
-      isActive: !isActive,
-      updatedAt: new Date().toISOString(),
-    })
+  async function toggleRule(id: string, isActive: boolean) {
+    await updateAlertRule(id, { isActive: !isActive })
     toast.success(isActive ? "Disabled" : "Enabled")
   }
 
-  async function deleteRule(id: number) {
-    await db.alertRules.delete(id)
+  async function deleteRule(id: string) {
+    await deleteAlertRule(id)
     toast.success("Rule deleted")
   }
 
-  async function updateParam(id: number, params: Record<string, number | string>, key: string, value: string) {
+  async function updateParam(id: string, params: Record<string, number | string>, key: string, value: string) {
     const newParams = { ...params, [key]: Number(value) }
-    await db.alertRules.update(id, {
-      parameters: newParams,
-      updatedAt: new Date().toISOString(),
-    })
+    await updateAlertRule(id, { parameters: newParams })
   }
 
   return (
@@ -1117,7 +1260,7 @@ function AlertRulesSettings({ rules }: { rules: Array<{
                   variant="outline"
                   size="sm"
                   className="h-6 text-[10px] px-2"
-                  onClick={() => toggleRule(rule.id!, rule.isActive)}
+                  onClick={() => toggleRule(String(rule.id!), rule.isActive)}
                 >
                   {rule.isActive ? "Disable" : "Enable"}
                 </Button>
@@ -1125,7 +1268,7 @@ function AlertRulesSettings({ rules }: { rules: Array<{
                   variant="ghost"
                   size="sm"
                   className="h-6 w-6 p-0 text-destructive"
-                  onClick={() => deleteRule(rule.id!)}
+                  onClick={() => deleteRule(String(rule.id!))}
                 >
                   <Trash2 className="h-3 w-3" />
                 </Button>
@@ -1143,7 +1286,7 @@ function AlertRulesSettings({ rules }: { rules: Array<{
                       type="number"
                       value={String(val)}
                       onChange={(e) =>
-                        updateParam(rule.id!, rule.parameters, key, e.target.value)
+                        updateParam(String(rule.id!), rule.parameters, key, e.target.value)
                       }
                       className="h-6 w-20 text-[10px]"
                     />
@@ -1203,6 +1346,7 @@ const CONDITION_LABELS: Record<AlertRuleCondition, string> = {
 }
 
 function AlertRuleDialog({ onClose }: { onClose: () => void }) {
+  const { addAlertRule } = useSupaAlertRules()
   const [name, setName] = useState("")
   const [condition, setCondition] = useState<AlertRuleCondition>("stock_below_threshold")
   const [isActive, setIsActive] = useState(true)
@@ -1218,19 +1362,16 @@ function AlertRuleDialog({ onClose }: { onClose: () => void }) {
 
   async function handleSave() {
     if (!name.trim()) return
-    const now = new Date().toISOString()
     const numericParams: Record<string, number | string> = {}
     for (const [k, v] of Object.entries(params)) {
       numericParams[k] = Number(v)
     }
-    await db.alertRules.add({
+    await addAlertRule({
       name: name.trim(),
       type: CONDITION_TO_TYPE[condition] as any,
       condition,
       parameters: numericParams,
       isActive,
-      createdAt: now,
-      updatedAt: now,
     })
     toast.success("Alert rule created")
     onClose()

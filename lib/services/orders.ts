@@ -1,13 +1,19 @@
-import { db } from "@/lib/db/client"
-import type { Order, OrderItem, OrderType, PaymentMethod } from "@/lib/db/schema"
-import { format } from "date-fns"
+import { supabase } from "@/lib/supabase/client"
+import type { OrderItem, OrderType, PaymentMethod } from "@/lib/db/schema"
 
-export async function generateOrderNumber(): Promise<string> {
-  const today = format(new Date(), "yyyyMMdd")
-  const todayStr = new Date().toISOString().split("T")[0]
-  const todayOrders = await db.orders.where("date").equals(todayStr).count()
-  const seq = String(todayOrders + 1).padStart(3, "0")
-  return `LL-${today}-${seq}`
+export async function generateOrderNumber(dateStr?: string): Promise<string> {
+  const targetDate = dateStr ?? new Date().toISOString().split("T")[0]
+  const formatted = targetDate.replace(/-/g, "")
+
+  // Count existing orders for the target date
+  const { count, error } = await supabase
+    .from("orders")
+    .select("*", { count: "exact", head: true })
+    .eq("date", targetDate)
+
+  if (error) console.error("Order count error:", error.message)
+  const seq = String((count ?? 0) + 1).padStart(3, "0")
+  return `LL-${formatted}-${seq}`
 }
 
 export async function createOrder(
@@ -15,70 +21,84 @@ export async function createOrder(
   paymentMethod: PaymentMethod,
   orderType: OrderType = "DineIn",
   discount: number = 0,
-  notes?: string
-): Promise<number> {
+  notes?: string,
+  orderDate?: string,
+  customerName?: string,
+  customerPhone?: string,
+  createdBy?: string
+): Promise<string> {
   const now = new Date().toISOString()
-  const date = now.split("T")[0]
-  const orderNumber = await generateOrderNumber()
+  const date = orderDate ?? now.split("T")[0]
+  const orderNumber = await generateOrderNumber(date)
   const subtotal = items.reduce((sum, item) => sum + item.lineTotal, 0)
   const totalAmount = Math.max(0, subtotal - discount)
 
-  const orderId = await db.transaction(
-    "rw",
-    [db.orders, db.ingredients, db.recipes, db.recipeIngredients, db.dailyRevenue],
-    async () => {
-      const id = await db.orders.add({
-        orderNumber,
-        orderType,
-        date,
-        items,
-        subtotal,
-        discount,
-        totalAmount,
-        paymentMethod,
-        notes,
-        createdAt: now,
-      })
+  // Insert order into Supabase
+  const { data: inserted, error: orderError } = await supabase
+    .from("orders")
+    .insert({
+      order_number: orderNumber,
+      order_type: orderType,
+      date,
+      items,
+      subtotal,
+      discount,
+      total_amount: totalAmount,
+      payment_method: paymentMethod,
+      notes: notes ?? null,
+      customer_name: customerName ?? null,
+      customer_phone: customerPhone ?? null,
+      created_by: createdBy ?? null,
+      created_at: now,
+    })
+    .select("id")
+    .single()
 
-      // Deduct inventory for each order item
-      for (const item of items) {
-        if (!item.customizations) {
-          const recipes = await db.recipes
-            .where("menuItemId")
-            .equals(item.menuItemId)
-            .toArray()
-          const recipe =
-            recipes.find((r) => r.sizeVariant === item.size) || recipes[0]
-          if (recipe) {
-            const recipeIngs = await db.recipeIngredients
-              .where("recipeId")
-              .equals(recipe.id!)
-              .toArray()
-            for (const ri of recipeIngs) {
-              const ingredient = await db.ingredients.get(ri.ingredientId)
-              if (ingredient) {
-                const newStock = Math.max(
-                  0,
-                  ingredient.currentStock - ri.quantity * item.quantity
-                )
-                await db.ingredients.update(ri.ingredientId, {
-                  currentStock: newStock,
-                  updatedAt: now,
-                })
-              }
-            }
+  if (orderError) throw new Error(`Failed to create order: ${orderError.message}`)
+
+  // Deduct inventory for each non-customized item
+  for (const item of items) {
+    if (!item.customizations) {
+      const { data: recipes } = await supabase
+        .from("recipes")
+        .select("*")
+        .eq("menu_item_id", String(item.menuItemId))
+
+      const recipe =
+        recipes?.find((r: any) => r.size_variant === item.size) ?? recipes?.[0]
+
+      if (recipe) {
+        const { data: recipeIngs } = await supabase
+          .from("recipe_ingredients")
+          .select("*")
+          .eq("recipe_id", recipe.id)
+
+        for (const ri of recipeIngs ?? []) {
+          const { data: ing } = await supabase
+            .from("ingredients")
+            .select("current_stock")
+            .eq("id", ri.ingredient_id)
+            .single()
+
+          if (ing) {
+            const newStock = Math.max(
+              0,
+              Number(ing.current_stock) - Number(ri.quantity) * item.quantity
+            )
+            await supabase
+              .from("ingredients")
+              .update({ current_stock: newStock, updated_at: now })
+              .eq("id", ri.ingredient_id)
           }
         }
       }
-
-      // Update daily revenue
-      await updateDailyRevenue(date, totalAmount, paymentMethod, now)
-
-      return id
     }
-  )
+  }
 
-  return orderId as number
+  // Update daily revenue
+  await updateDailyRevenue(date, totalAmount, paymentMethod, now)
+
+  return inserted.id as string
 }
 
 async function updateDailyRevenue(
@@ -87,32 +107,40 @@ async function updateDailyRevenue(
   paymentMethod: string,
   now: string
 ): Promise<void> {
-  const existing = await db.dailyRevenue.where("date").equals(date).first()
   const key = paymentMethod.toLowerCase() as "cash" | "upi" | "card"
 
+  const { data: existing } = await supabase
+    .from("daily_revenue")
+    .select("*")
+    .eq("date", date)
+    .single()
+
   if (existing) {
-    const breakdown = { ...existing.paymentBreakdown }
-    breakdown[key] += amount
-    const newTotal = existing.totalSales + amount
-    const newCount = existing.numberOfOrders + 1
-    await db.dailyRevenue.update(existing.id!, {
-      totalSales: newTotal,
-      numberOfOrders: newCount,
-      paymentBreakdown: breakdown,
-      averageOrderValue: newTotal / newCount,
-      updatedAt: now,
-    })
+    const breakdown = { ...(existing.payment_breakdown as Record<string, number>) }
+    breakdown[key] = (breakdown[key] ?? 0) + amount
+    const newTotal = Number(existing.total_sales) + amount
+    const newCount = Number(existing.number_of_orders) + 1
+    await supabase
+      .from("daily_revenue")
+      .update({
+        total_sales: newTotal,
+        number_of_orders: newCount,
+        payment_breakdown: breakdown,
+        average_order_value: newTotal / newCount,
+        updated_at: now,
+      })
+      .eq("id", existing.id)
   } else {
     const breakdown = { cash: 0, upi: 0, card: 0 }
     breakdown[key] = amount
-    await db.dailyRevenue.add({
+    await supabase.from("daily_revenue").insert({
       date,
-      totalSales: amount,
-      numberOfOrders: 1,
-      paymentBreakdown: breakdown,
-      averageOrderValue: amount,
-      createdAt: now,
-      updatedAt: now,
+      total_sales: amount,
+      number_of_orders: 1,
+      payment_breakdown: breakdown,
+      average_order_value: amount,
+      created_at: now,
+      updated_at: now,
     })
   }
 }

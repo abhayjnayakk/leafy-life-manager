@@ -1,8 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { useLiveQuery } from "dexie-react-hooks"
-import { db } from "@/lib/db/client"
+import { useSupaIngredients } from "@/lib/hooks/useSupaIngredients"
 import { Plus, Search, Minus, Trash2, Package, Snowflake, Sun, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -42,12 +41,9 @@ export default function InventoryPage() {
   const [addDialogOpen, setAddDialogOpen] = useState(false)
   const [viewMode, setViewMode] = useState<ViewMode>("category")
 
-  const ingredients = useLiveQuery(() =>
-    db.ingredients.orderBy("name").toArray(),
-    []
-  )
+  const { ingredients: allIngredients } = useSupaIngredients()
 
-  const filtered = (ingredients ?? [])
+  const filtered = (allIngredients ?? [])
     .filter((ing) => {
       const matchesSearch = ing.name.toLowerCase().includes(search.toLowerCase())
       const matchesCategory =
@@ -183,7 +179,7 @@ export default function InventoryPage() {
                         <IngredientCard
                           ingredient={ing}
                           onDelete={async () => {
-                            await deleteIngredient(ing.id!)
+                            await deleteIngredient(String(ing.id!))
                             toast.success(`Deleted ${ing.name}`)
                           }}
                         />
@@ -201,7 +197,7 @@ export default function InventoryPage() {
                 <IngredientCard
                   ingredient={ing}
                   onDelete={async () => {
-                    await deleteIngredient(ing.id!)
+                    await deleteIngredient(String(ing.id!))
                     toast.success(`Deleted ${ing.name}`)
                   }}
                 />
@@ -314,7 +310,7 @@ function IngredientCard({
 
   async function handleRestock() {
     if (restockQty <= 0) return
-    await updateStock(ing.id!, ing.currentStock + restockQty)
+    await updateStock(String(ing.id!), ing.currentStock + restockQty)
     toast.success(`Restocked ${ing.name} by ${restockQty} ${ing.unit}`)
     setRestocking(false)
     setRestockQty(1)

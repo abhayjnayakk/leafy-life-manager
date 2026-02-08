@@ -1,4 +1,4 @@
-import { db } from "@/lib/db/client"
+import { supabase } from "@/lib/supabase/client"
 import { startOfMonth, endOfMonth, format, eachDayOfInterval } from "date-fns"
 import { calculateRevenueShare } from "./revenueShare"
 
@@ -37,26 +37,38 @@ export async function calculateMonthlyPnL(
   const monthEnd = endOfMonth(new Date(year, month))
   const monthStr = format(monthStart, "yyyy-MM")
 
+  const startDate = format(monthStart, "yyyy-MM-dd")
+  const endDate = format(monthEnd, "yyyy-MM-dd")
+
   const days = eachDayOfInterval({ start: monthStart, end: monthEnd })
   const dateStrings = days.map((d) => format(d, "yyyy-MM-dd"))
 
-  const dailyRecords = await db.dailyRevenue
-    .where("date")
-    .anyOf(dateStrings)
-    .toArray()
+  const { data: dailyRecords, error: revenueError } = await supabase
+    .from("daily_revenue")
+    .select("*")
+    .gte("date", startDate)
+    .lte("date", endDate)
 
-  const totalRevenue = dailyRecords.reduce((s, r) => s + r.totalSales, 0)
-  const totalOrders = dailyRecords.reduce((s, r) => s + r.numberOfOrders, 0)
+  if (revenueError) {
+    throw new Error(`Failed to fetch daily revenue: ${revenueError.message}`)
+  }
 
-  const allExpenses = await db.expenses
-    .where("date")
-    .between(
-      format(monthStart, "yyyy-MM-dd"),
-      format(monthEnd, "yyyy-MM-dd"),
-      true,
-      true
-    )
-    .toArray()
+  const records = dailyRecords ?? []
+
+  const totalRevenue = records.reduce((s, r) => s + r.total_sales, 0)
+  const totalOrders = records.reduce((s, r) => s + r.number_of_orders, 0)
+
+  const { data: allExpensesData, error: expensesError } = await supabase
+    .from("expenses")
+    .select("*")
+    .gte("date", startDate)
+    .lte("date", endDate)
+
+  if (expensesError) {
+    throw new Error(`Failed to fetch expenses: ${expensesError.message}`)
+  }
+
+  const allExpenses = allExpensesData ?? []
 
   const expensesByCategory = {
     rent: 0,
@@ -101,14 +113,14 @@ export async function calculateMonthlyPnL(
   const netProfit = totalRevenue - expensesByCategory.total
 
   const dailyBreakdown: DailySnapshot[] = dateStrings.map((dateStr) => {
-    const dayRev = dailyRecords.find((r) => r.date === dateStr)
+    const dayRev = records.find((r) => r.date === dateStr)
     const dayExpenses = allExpenses
       .filter((e) => e.date === dateStr)
       .reduce((s, e) => s + e.amount, 0)
     return {
       date: dateStr,
-      revenue: dayRev?.totalSales ?? 0,
-      orders: dayRev?.numberOfOrders ?? 0,
+      revenue: dayRev?.total_sales ?? 0,
+      orders: dayRev?.number_of_orders ?? 0,
       expenses: dayExpenses,
     }
   })

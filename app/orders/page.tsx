@@ -1,10 +1,12 @@
 "use client"
 
 import { useState, useCallback, useMemo, useRef, useEffect } from "react"
-import { useLiveQuery } from "dexie-react-hooks"
-import { db } from "@/lib/db/client"
+import { useSupaMenuItems } from "@/lib/hooks/useSupaMenuItems"
+import { useSupaOrders } from "@/lib/hooks/useSupaOrders"
+import { useAuth } from "@/lib/auth"
+import { supabase } from "@/lib/supabase/client"
 import {
-  Minus, Plus, ShoppingCart, Trash2, X, Store, Truck, Clock, ChevronUp, Search,
+  Minus, Plus, ShoppingCart, Trash2, X, Store, Truck, Clock, ChevronUp, Search, Package, CalendarClock,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -29,10 +31,13 @@ interface CartItem extends OrderItem {
 function getPrice(item: MenuItem, size: SizeOption, orderType: OrderType): number {
   const s = item.sizes.find((sz) => sz.size === size)
   if (!s) return 0
-  return orderType === "DineIn" ? (s.dineInPrice ?? s.price) : s.price
+  if (orderType === "DineIn") return s.dineInPrice ?? s.price
+  if (orderType === "Takeaway") return s.takeawayPrice ?? (s.dineInPrice ?? s.price) + 10
+  return s.price
 }
 
 export default function OrdersPage() {
+  const { user, isAdmin } = useAuth()
   const [orderType, setOrderType] = useState<OrderType>("DineIn")
   const [cart, setCart] = useState<CartItem[]>([])
   const [discount, setDiscount] = useState("")
@@ -45,11 +50,23 @@ export default function OrdersPage() {
   const [customizeItem, setCustomizeItem] = useState<CartItem | null>(null)
   const [search, setSearch] = useState("")
 
-  const menuItems = useLiveQuery(() => db.menuItems.filter((m) => m.isActive && !m.isCustomizable).toArray(), [])
-  const todayOrders = useLiveQuery(() => db.orders.where("date").equals(historyDate).reverse().toArray(), [historyDate])
+  // Backdate support (admin only)
+  const [backdateMode, setBackdateMode] = useState(false)
+  const [backdateDate, setBackdateDate] = useState("")
 
-  const categories = useMemo(() => [...new Set((menuItems ?? []).map((m) => m.category))], [menuItems])
-  const filtered = useMemo(() => (menuItems ?? [])
+  // Customer info
+  const [customerName, setCustomerName] = useState("")
+  const [customerPhone, setCustomerPhone] = useState("")
+
+  // Supabase hooks
+  const { menuItems: allMenuItems, loading: menuLoading } = useSupaMenuItems()
+  const { orders: todayOrders } = useSupaOrders(historyDate)
+
+  // Filter active menu items (include custom bowls - no isCustomizable filter)
+  const menuItems = useMemo(() => allMenuItems.filter((m) => m.isActive), [allMenuItems])
+
+  const categories = useMemo(() => [...new Set(menuItems.map((m) => m.category))], [menuItems])
+  const filtered = useMemo(() => menuItems
     .filter((m) => {
       const matchesCategory = !activeCategory || m.category === activeCategory
       const matchesSearch = !search || m.name.toLowerCase().includes(search.toLowerCase())
@@ -69,7 +86,7 @@ export default function OrdersPage() {
     }))
   }, [])
 
-  const flashTimerRef = useRef<ReturnType<typeof setTimeout>>()
+  const flashTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   useEffect(() => () => { clearTimeout(flashTimerRef.current) }, [])
 
   function addToCart(item: MenuItem, size: SizeOption) {
@@ -109,38 +126,88 @@ export default function OrdersPage() {
   async function handlePlaceOrder() {
     if (cart.length === 0) return
     const items: OrderItem[] = cart.map(({ _key, ...i }) => i)
-    await createOrder(items, paymentMethod, orderType, discountAmt)
+    await createOrder(
+      items,
+      paymentMethod,
+      orderType,
+      discountAmt,
+      undefined,
+      backdateMode ? backdateDate : undefined,
+      customerName.trim() || undefined,
+      customerPhone.trim() || undefined,
+      user?.userId
+    )
     toast.success(`Order placed! ${formatINR(total)}`)
     setCart([])
     setDiscount("")
     setCartExpanded(false)
+    setCustomerName("")
+    setCustomerPhone("")
+    setBackdateMode(false)
+    setBackdateDate("")
   }
 
-  const isLoading = menuItems === undefined
+  const isLoading = menuLoading
 
   return (
     <AnimatedPage className="space-y-2.5 pb-36">
-      {/* Header with History toggle */}
+      {/* Header with Order Type toggle, Backdate, and History */}
       <div className="flex items-center justify-between">
-        <div className="inline-flex rounded-xl bg-muted p-1 gap-0.5">
-          {(["DineIn", "Delivery"] as OrderType[]).map((t) => (
-            <button key={t} onClick={() => handleOrderTypeChange(t)}
-              className="relative rounded-lg px-3 py-1.5 text-xs font-medium transition-colors">
-              {orderType === t && (
-                <motion.div layoutId="order-type-pill" className="absolute inset-0 rounded-lg bg-card shadow-sm"
-                  transition={{ type: "spring", stiffness: 400, damping: 30 }} />
-              )}
-              <span className="relative z-10 flex items-center gap-1.5">
-                {t === "DineIn" ? <Store className="h-3.5 w-3.5" /> : <Truck className="h-3.5 w-3.5" />}
-                {t === "DineIn" ? "Dine In" : "Delivery"}
-              </span>
+        <div className="flex items-center gap-2">
+          <div className="inline-flex rounded-xl bg-muted p-1 gap-0.5">
+            {(["DineIn", "Takeaway", "Delivery"] as OrderType[]).map((t) => (
+              <button key={t} onClick={() => handleOrderTypeChange(t)}
+                className="relative rounded-lg px-3 py-1.5 text-xs font-medium transition-colors">
+                {orderType === t && (
+                  <motion.div layoutId="order-type-pill" className="absolute inset-0 rounded-lg bg-card shadow-sm"
+                    transition={{ type: "spring", stiffness: 400, damping: 30 }} />
+                )}
+                <span className="relative z-10 flex items-center gap-1.5">
+                  {t === "DineIn" ? <Store className="h-3.5 w-3.5" /> : t === "Takeaway" ? <Package className="h-3.5 w-3.5" /> : <Truck className="h-3.5 w-3.5" />}
+                  {t === "DineIn" ? "Dine In" : t === "Takeaway" ? "Take Away" : "Delivery"}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          {/* Backdate button (admin only) */}
+          {isAdmin && (
+            <button
+              onClick={() => { setBackdateMode(!backdateMode); if (backdateMode) setBackdateDate("") }}
+              className={`rounded-lg p-2 transition-colors ${backdateMode ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" : "hover:bg-muted text-muted-foreground"}`}
+              title="Past Order"
+            >
+              <CalendarClock className="h-4 w-4" />
             </button>
-          ))}
+          )}
         </div>
         <button onClick={() => setHistoryOpen(true)} className="rounded-lg p-2 hover:bg-muted transition-colors">
           <Clock className="h-4 w-4 text-muted-foreground" />
         </button>
       </div>
+
+      {/* Backdate date picker */}
+      <AnimatePresence>
+        {backdateMode && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden"
+          >
+            <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 p-2">
+              <CalendarClock className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
+              <span className="text-xs font-medium text-amber-700 dark:text-amber-400">Past Order Date:</span>
+              <Input
+                type="date"
+                value={backdateDate}
+                onChange={(e) => setBackdateDate(e.target.value)}
+                max={new Date(Date.now() - 86400000).toISOString().split("T")[0]}
+                className="h-7 w-40 text-xs"
+              />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Category chips */}
       <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1 scrollbar-none">
@@ -208,7 +275,7 @@ export default function OrdersPage() {
                 <div className="text-sm font-medium leading-tight">{item.name}</div>
                 <div className="flex gap-1">
                   {item.sizes.map((s) => {
-                    const price = orderType === "DineIn" ? (s.dineInPrice ?? s.price) : s.price
+                    const price = getPrice(item, s.size, orderType)
                     return (
                       <button key={s.size} onClick={() => addToCart(item, s.size)}
                         className="flex-1 rounded-lg bg-muted/60 hover:bg-primary/10 hover:text-primary py-1.5 text-xs font-semibold transition-colors">
@@ -270,6 +337,28 @@ export default function OrdersPage() {
                   </div>
                 ))}
 
+                {/* Customer info fields */}
+                <div className="flex gap-2 pt-2 border-t">
+                  <div className="flex-1">
+                    <Input
+                      type="text"
+                      value={customerName}
+                      onChange={(e) => setCustomerName(e.target.value)}
+                      placeholder="Customer name"
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <Input
+                      type="tel"
+                      value={customerPhone}
+                      onChange={(e) => setCustomerPhone(e.target.value)}
+                      placeholder="Phone number"
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                </div>
+
                 <div className="flex items-center gap-2 pt-2 border-t">
                   <Label className="text-xs shrink-0">Discount ₹</Label>
                   <Input type="number" min="0" value={discount} onChange={(e) => setDiscount(e.target.value)} placeholder="0" className="h-8 w-24" />
@@ -309,9 +398,16 @@ export default function OrdersPage() {
                 {(todayOrders ?? []).map((order) => (
                   <div key={order.id} className="rounded-xl border p-3">
                     <div className="flex items-center justify-between mb-2">
-                      <span className="font-medium text-sm">{order.orderNumber}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-sm">{order.orderNumber}</span>
+                        {order.customerName && (
+                          <span className="text-xs text-muted-foreground">- {order.customerName}</span>
+                        )}
+                      </div>
                       <div className="flex gap-1.5">
-                        <Badge variant="outline" className="text-xs">{order.orderType === "DineIn" ? "Dine In" : "Delivery"}</Badge>
+                        <Badge variant="outline" className="text-xs">
+                          {order.orderType === "DineIn" ? "Dine In" : order.orderType === "Takeaway" ? "Take Away" : "Delivery"}
+                        </Badge>
                         <Badge variant="secondary" className="text-xs">{order.paymentMethod}</Badge>
                       </div>
                     </div>
@@ -344,16 +440,60 @@ export default function OrdersPage() {
 function ItemCustomizeDialog({ item, onClose, onSave }: {
   item: CartItem; onClose: () => void; onSave: (ex: string[], ins: string) => void
 }) {
-  const recipeIngredients = useLiveQuery(async () => {
-    const recipes = await db.recipes.where("menuItemId").equals(item.menuItemId).toArray()
-    if (recipes.length === 0) return []
-    const recipe = recipes.find((r) => r.sizeVariant === item.size) || recipes[0]
-    if (!recipe) return []
-    const ris = await db.recipeIngredients.where("recipeId").equals(recipe.id!).toArray()
-    return Promise.all(ris.map(async (ri) => {
-      const ing = await db.ingredients.get(ri.ingredientId)
-      return { id: ri.id!, name: ing?.name ?? "Unknown" }
-    }))
+  const [recipeIngredients, setRecipeIngredients] = useState<{ id: string; name: string }[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    async function fetchRecipeIngredients() {
+      try {
+        const { data: recipes } = await supabase
+          .from("recipes")
+          .select("*")
+          .eq("menu_item_id", String(item.menuItemId))
+
+        if (!recipes || recipes.length === 0) {
+          setLoading(false)
+          return
+        }
+
+        const recipe = recipes.find((r: any) => r.size_variant === item.size) || recipes[0]
+        if (!recipe) {
+          setLoading(false)
+          return
+        }
+
+        const { data: ris } = await supabase
+          .from("recipe_ingredients")
+          .select("*")
+          .eq("recipe_id", recipe.id)
+
+        if (!ris || ris.length === 0) {
+          setLoading(false)
+          return
+        }
+
+        const ingredientIds = ris.map((ri: any) => ri.ingredient_id)
+        const { data: ingredients } = await supabase
+          .from("ingredients")
+          .select("id, name")
+          .in("id", ingredientIds)
+
+        const ingMap = new Map((ingredients ?? []).map((ing: any) => [ing.id, ing.name]))
+
+        setRecipeIngredients(
+          ris.map((ri: any) => ({
+            id: ri.id,
+            name: (ingMap.get(ri.ingredient_id) as string) ?? "Unknown",
+          }))
+        )
+      } catch (err) {
+        console.error("Failed to fetch recipe ingredients:", err)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchRecipeIngredients()
   }, [item.menuItemId, item.size])
 
   const [excluded, setExcluded] = useState<string[]>(item.excludedIngredients ?? [])
@@ -366,17 +506,25 @@ function ItemCustomizeDialog({ item, onClose, onSave }: {
         <div className="space-y-4">
           <div className="space-y-2">
             <Label className="text-sm font-medium">Exclude Ingredients</Label>
-            <div className="flex flex-wrap gap-1.5">
-              {(recipeIngredients ?? []).map((ing) => {
-                const ex = excluded.includes(ing.name)
-                return (
-                  <button key={ing.id} onClick={() => setExcluded((p) => ex ? p.filter((n) => n !== ing.name) : [...p, ing.name])}
-                    className={`rounded-full px-2.5 py-1 text-xs font-medium border transition-colors ${ex ? "bg-destructive/10 text-destructive border-destructive/30 line-through" : "bg-secondary text-secondary-foreground border-transparent hover:bg-secondary/80"}`}>
-                    {ing.name}{ex && <X className="h-3 w-3 inline ml-1" />}
-                  </button>
-                )
-              })}
-            </div>
+            {loading ? (
+              <div className="flex flex-wrap gap-1.5">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className="h-7 w-16 rounded-full bg-muted animate-pulse" />
+                ))}
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {recipeIngredients.map((ing) => {
+                  const ex = excluded.includes(ing.name)
+                  return (
+                    <button key={ing.id} onClick={() => setExcluded((p) => ex ? p.filter((n) => n !== ing.name) : [...p, ing.name])}
+                      className={`rounded-full px-2.5 py-1 text-xs font-medium border transition-colors ${ex ? "bg-destructive/10 text-destructive border-destructive/30 line-through" : "bg-secondary text-secondary-foreground border-transparent hover:bg-secondary/80"}`}>
+                      {ing.name}{ex && <X className="h-3 w-3 inline ml-1" />}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
           </div>
           <div className="space-y-2">
             <Label className="text-sm font-medium">Special Instructions</Label>
