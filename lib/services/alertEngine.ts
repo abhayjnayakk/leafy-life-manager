@@ -3,16 +3,21 @@ import type { Alert } from "@/lib/db/schema"
 import { format, subDays, startOfMonth, endOfMonth, differenceInDays, parseISO } from "date-fns"
 
 export async function runAlertEngine(): Promise<number> {
-  // Fetch active rules and existing unresolved alerts in parallel
-  const [{ data: rulesData }, { data: existingData }] = await Promise.all([
+  // Fetch active rules and existing alerts (including resolved ones from today)
+  // This prevents re-creating alerts that were dismissed earlier today
+  const todayStart = new Date()
+  todayStart.setHours(0, 0, 0, 0)
+  const [{ data: rulesData }, { data: unresolvedData }, { data: todayResolvedData }] = await Promise.all([
     supabase.from("alert_rules").select("*").eq("is_active", true),
     supabase.from("alerts").select("type,title,related_entity_id").is("resolved_at", null),
+    supabase.from("alerts").select("type,title,related_entity_id").gte("created_at", todayStart.toISOString()).not("resolved_at", "is", null),
   ])
+  const existingData = [...(unresolvedData ?? []), ...(todayResolvedData ?? [])]
 
   const activeRules = rulesData ?? []
   if (activeRules.length === 0) return 0
 
-  const existingAlerts = existingData ?? []
+  const existingAlerts = existingData
   const now = new Date().toISOString()
 
   // Collect all check promises — run ALL checks in parallel
@@ -108,14 +113,21 @@ function checkRentDue(
 ): Omit<Alert, "id">[] {
   const dayOfMonth = (params.dayOfMonth as number) || 1
   const reminderDays = (params.reminderDaysBefore as number) || 3
-  const currentDay = new Date().getDate()
-  const daysUntilDue = dayOfMonth >= currentDay ? dayOfMonth - currentDay : 0
+  const today = new Date()
+  const currentDay = today.getDate()
+
+  // Only alert BEFORE or ON the due date — stop alerting after it passes
+  if (currentDay > dayOfMonth) return []
+
+  const daysUntilDue = dayOfMonth - currentDay
 
   if (daysUntilDue <= reminderDays) {
+    // Include month in title so dedup is scoped per-month (max 1 rent alert per month)
+    const monthLabel = today.toLocaleString("en-IN", { month: "long", year: "numeric" })
     return [{
       type: "RentDue",
       severity: daysUntilDue === 0 ? "high" : "medium",
-      title: "Rent Payment Due",
+      title: `Rent Due — ${monthLabel}`,
       description: daysUntilDue === 0
         ? "Rent payment is due today!"
         : `Rent payment is due in ${daysUntilDue} day(s)`,
@@ -143,8 +155,8 @@ async function checkLowRevenue(
     return [{
       type: "RevenueThreshold",
       severity: totalSales < threshold * 0.5 ? "high" : "medium",
-      title: "Low Revenue Alert",
-      description: `Yesterday's revenue was Rs ${totalSales.toLocaleString("en-IN")} (below Rs ${(threshold as number).toLocaleString("en-IN")})`,
+      title: `Low Revenue — ${yesterday}`,
+      description: `Revenue was ₹${totalSales.toLocaleString("en-IN")} (below ₹${(threshold as number).toLocaleString("en-IN")})`,
       isRead: false,
       createdAt: now,
     }]
@@ -169,8 +181,8 @@ async function checkHighRevenue(
     return [{
       type: "RevenueThreshold",
       severity: "low",
-      title: "Great Revenue Day!",
-      description: `Yesterday's revenue was Rs ${totalSales.toLocaleString("en-IN")} - above Rs ${(threshold as number).toLocaleString("en-IN")} target`,
+      title: `Great Revenue — ${yesterday}`,
+      description: `Revenue was ₹${totalSales.toLocaleString("en-IN")} — above ₹${(threshold as number).toLocaleString("en-IN")} target`,
       isRead: false,
       createdAt: now,
     }]
@@ -196,12 +208,13 @@ async function checkExpenseBudget(
   const totalExpenses = (data ?? []).reduce((s: number, e: any) => s + Number(e.amount), 0)
   const alerts: Omit<Alert, "id">[] = []
 
+  const monthLabel = today.toLocaleString("en-IN", { month: "long", year: "numeric" })
   if (totalExpenses > monthlyBudget) {
     alerts.push({
       type: "HighExpense",
       severity: totalExpenses > monthlyBudget * 1.2 ? "critical" : "high",
-      title: "Monthly Expense Budget Exceeded",
-      description: `Total expenses: Rs ${totalExpenses.toLocaleString("en-IN")} (budget: Rs ${monthlyBudget.toLocaleString("en-IN")})`,
+      title: `Budget Exceeded — ${monthLabel}`,
+      description: `Expenses: ₹${totalExpenses.toLocaleString("en-IN")} (budget: ₹${monthlyBudget.toLocaleString("en-IN")})`,
       isRead: false,
       createdAt: now,
     })
@@ -209,8 +222,8 @@ async function checkExpenseBudget(
     alerts.push({
       type: "HighExpense",
       severity: "medium",
-      title: "Approaching Expense Budget",
-      description: `Total expenses: Rs ${totalExpenses.toLocaleString("en-IN")} (${Math.round((totalExpenses / monthlyBudget) * 100)}% of budget)`,
+      title: `Nearing Budget — ${monthLabel}`,
+      description: `Expenses: ₹${totalExpenses.toLocaleString("en-IN")} (${Math.round((totalExpenses / monthlyBudget) * 100)}% of budget)`,
       isRead: false,
       createdAt: now,
     })
